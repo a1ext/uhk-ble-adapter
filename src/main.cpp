@@ -30,10 +30,12 @@ static bool        modePending = false;
 static uint32_t    modeApplyAtMs = 0;
 static const char *bootNote = nullptr;
 static uint32_t    lastActivityMs = 0;
+static uint8_t     screenLevel = DISPLAY_BRIGHTNESS; // where the brightness is heading
 
 static void wakeScreen()
 {
     lastActivityMs = millis();
+    screenLevel = DISPLAY_BRIGHTNESS;
     display_set_brightness(DISPLAY_BRIGHTNESS);
 }
 
@@ -79,6 +81,12 @@ static void onPairCancel()
 {
     wakeScreen();
     ble_hid_stop_pairing();
+}
+
+static void onAgentAllow(bool allow)
+{
+    wakeScreen();
+    bridge_agent_allow(allow);
 }
 
 // Physical pairing button(s): hold = pairing mode, press while pairing = cancel
@@ -144,15 +152,15 @@ static lv_indev_t *touchIndev()
     return nullptr;
 }
 
-// Any touch is activity. A touch on a dark screen only wakes it: LVGL does
-// not see it, so it cannot flip the switch blindly.
+// Any touch is activity. A touch on a dark (or fading out) screen only wakes
+// it: LVGL does not see it, so it cannot flip the switch blindly.
 static void pollTouch()
 {
     static bool swallowing = false;
     int16_t x, y;
     bool touched = display_get_touch(&x, &y);
     if (touched) {
-        if (display_brightness() == 0 && !swallowing) {
+        if ((screenLevel == 0 || display_brightness() == 0) && !swallowing) {
             swallowing = true;
             if (lv_indev_t *in = touchIndev()) {
                 lv_indev_reset(in, nullptr);
@@ -179,7 +187,7 @@ static void updateScreenPower()
     OtaStatus ota;
     ota_get_status(ota);
     int signature = bs.usbConnected | ble.connected << 1 | ble.ready << 2 | (bs.note != nullptr) << 3
-                  | ota.active << 4;
+                  | ota.active << 4 | ble.passkeyShown << 5 | bs.agentAsking << 6;
     if (signature != lastSignature) {
         lastSignature = signature;
         wakeScreen();
@@ -188,8 +196,10 @@ static void updateScreenPower()
     uint32_t idle = millis() - lastActivityMs;
     uint8_t level = idle > SCREEN_OFF_MS ? 0
                   : idle > SCREEN_DIM_MS ? DISPLAY_DIM_BRIGHTNESS : DISPLAY_BRIGHTNESS;
-    if (level < display_brightness()) // only dims here, wakeScreen() brightens
-        display_set_brightness(level);
+    if (level < screenLevel) { // only dims here, wakeScreen() brightens
+        screenLevel = level;
+        display_fade_to(level, SCREEN_FADE_MS);
+    }
 }
 
 void setup()
@@ -228,7 +238,7 @@ void setup()
     if (!display_begin())
         logf("Display init failed");
     bridge_begin(); // loads the cached HID map and the BLE host slots
-    ui_begin({onModeRequest, onSlotRequest, onPair, onPairCancel});
+    ui_begin({onModeRequest, onSlotRequest, onPair, onPairCancel, onAgentAllow});
     // Draw the first frame now: BLE / USB host start below can take a while
     ui_update(wantBt, bootNote);
     lv_refr_now(nullptr);
@@ -256,6 +266,7 @@ void loop()
         updateScreenPower();
         ui_update(wantBt, bootNote);
     }
+    display_loop();
     lv_task_handler();
     delay(5);
 }

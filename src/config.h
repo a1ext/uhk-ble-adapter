@@ -27,6 +27,7 @@ static constexpr uint8_t  DISPLAY_DIM_BRIGHTNESS = 51;  // 20%
 // (touch, button, keyboard / BLE connection change)
 static constexpr uint32_t SCREEN_DIM_MS = 60 * 1000UL;
 static constexpr uint32_t SCREEN_OFF_MS = 3 * 60 * 1000UL;
+static constexpr uint32_t SCREEN_FADE_MS = 2500; // dim / off fade, slowing down towards the end
 
 // ---------------- BLE ----------------
 // Host slots: each slot is a separate BLE device ("UHK60 BLE 1".."3") with its
@@ -38,8 +39,13 @@ static constexpr const char *BLE_MANUFACTURER = "DIY";
 // 0xFF00, usage 1) gets its own HID service (a separate HID device on the
 // host, no report IDs - like the USB interface), and the BLE PnP ID is the
 // keyboard's own USB VID:PID, so Agent recognizes it as the keyboard.
-// Firmware update commands are refused over BLE: they re-enumerate the keyboard.
+// Read-only status commands pass; the user config (read / write), macros and
+// other state changes need "Allow" on the screen; firmware updates are refused.
 static constexpr bool     BLE_AGENT_CHANNEL = true;
+// Agent config access lasts this long after its last command (and ends when
+// the host disconnects); the "allow?" prompt stays up this long
+static constexpr uint32_t AGENT_UNLOCK_MS = 10 * 60 * 1000UL;
+static constexpr uint32_t AGENT_PROMPT_MS = 30 * 1000UL;
 // PnP ID when the Agent channel is off: deliberately not the keyboard's
 static constexpr uint16_t BLE_PNP_VID = 0x303A;         // Espressif
 static constexpr uint16_t BLE_PNP_PID = 0x8360;

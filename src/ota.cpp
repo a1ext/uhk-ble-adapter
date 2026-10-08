@@ -7,6 +7,7 @@
 #include <esp_ota_ops.h>
 #include <freertos/stream_buffer.h>
 #include <mbedtls/sha256.h>
+#include "ble_hid.h"
 #include "config.h"
 #include "log.h"
 
@@ -58,6 +59,8 @@ static void notifyState(uint8_t state, uint32_t offset)
 class CtrlCallbacks : public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic *c) override
     {
+        if (!ble_hid_ready()) // only the active slot's authenticated host
+            return;
         std::string v = c->getValue();
         Req r{};
         if (v.size() >= 37 && (uint8_t)v[0] == CMD_BEGIN) {
@@ -76,7 +79,7 @@ class CtrlCallbacks : public BLECharacteristicCallbacks {
 class DataCallbacks : public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic *c) override
     {
-        if (!active)
+        if (!active || !ble_hid_ready())
             return;
         std::string v = c->getValue();
         // The host keeps its window below the buffer size; no room = it did not
@@ -210,18 +213,18 @@ void ota_init()
 void ota_create_service(BLEServer *server)
 {
     BLEService *svc = server->createService(BLEUUID(OTA_SERVICE_UUID), 10, 0);
-    // Encrypted link only: just bonded hosts may flash the adapter
+    // Passkey-paired link only, and the active slot's host (checked on write)
     ctrlChr = svc->createCharacteristic(BLEUUID(OTA_CTRL_UUID), BLECharacteristic::PROPERTY_WRITE
                                                                     | BLECharacteristic::PROPERTY_NOTIFY);
-    ctrlChr->setAccessPermissions(ESP_GATT_PERM_READ_ENCRYPTED | ESP_GATT_PERM_WRITE_ENCRYPTED);
+    ctrlChr->setAccessPermissions(ESP_GATT_PERM_READ_ENC_MITM | ESP_GATT_PERM_WRITE_ENC_MITM);
     BLE2902 *cccd = new BLE2902();
-    cccd->setAccessPermissions(ESP_GATT_PERM_READ_ENCRYPTED | ESP_GATT_PERM_WRITE_ENCRYPTED);
+    cccd->setAccessPermissions(ESP_GATT_PERM_READ_ENC_MITM | ESP_GATT_PERM_WRITE_ENC_MITM);
     ctrlChr->addDescriptor(cccd);
     ctrlChr->setCallbacks(new CtrlCallbacks());
 
     BLECharacteristic *data = svc->createCharacteristic(BLEUUID(OTA_DATA_UUID),
                                                         BLECharacteristic::PROPERTY_WRITE_NR);
-    data->setAccessPermissions(ESP_GATT_PERM_WRITE_ENCRYPTED);
+    data->setAccessPermissions(ESP_GATT_PERM_WRITE_ENC_MITM);
     data->setCallbacks(new DataCallbacks());
     svc->start();
 }

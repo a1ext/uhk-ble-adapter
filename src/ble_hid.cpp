@@ -9,6 +9,7 @@
 #include <esp_gap_ble_api.h>
 #include <esp_gatt_common_api.h>
 #include <esp_system.h>
+#include <mbedtls/aes.h>
 #include <array>
 #include "log.h"
 #include "ota.h"
@@ -20,9 +21,14 @@ static const int HID_SERVICE_HANDLES   = 40;
 static const int HID_BASE_HANDLES      = 9;
 static const int AGENT_SERVICE_HANDLES = 20;
 
-// Encryption normally completes right after connecting; if the auth event
-// never arrives, start sending anyway after this delay
-static const uint32_t SECURE_FALLBACK_MS = 3000;
+// A link must be encrypted by the active slot's host within this time
+// (bonded hosts encrypt right after connecting), otherwise it is dropped
+static const uint32_t UNSECURED_LINK_MS = 10000;
+// In pairing mode the user types the passkey on the host first
+static const uint32_t PAIRING_LINK_MS = 60000;
+// Pairing needs a passkey (MITM protection), all attributes need such a link
+static const esp_gatt_perm_t PERM_READ = ESP_GATT_PERM_READ_ENC_MITM;
+static const esp_gatt_perm_t PERM_RW   = ESP_GATT_PERM_READ_ENC_MITM | ESP_GATT_PERM_WRITE_ENC_MITM;
 
 static const char *NVS_NAMESPACE = "bleslots";
 
@@ -31,6 +37,8 @@ struct Slot {
     esp_bd_addr_t host;
     uint8_t       gen;     // bumped when a new host replaces the old one: fresh address
 };
+typedef std::array<uint8_t, 6> Addr;
+
 static Slot             slots[BLE_SLOTS];
 static volatile uint8_t curSlot = 0;
 static Preferences      nvs;
@@ -44,12 +52,17 @@ static bool started = false;
 static volatile bool     enabled = false;
 static volatile bool     connected = false;
 static volatile bool     secured = false;
+static volatile bool     authorized = false;    // encrypted by the active slot's host: reports flow
+static volatile bool     keysExchanged = false; // this connection paired (not just re-encrypted)
+static volatile bool     dropRequested = false;
+static volatile uint32_t passkey = 0;
+static volatile bool     passkeyShown = false;
 static volatile bool     congested = false;
 static volatile bool     advertising = false;
 static bool              advDiscoverable = false;
 static volatile bool     pairing = false;
 static uint32_t          pairingUntilMs = 0;
-static std::vector<std::array<uint8_t, 6>> bondsBeforePairing; // to find the new host's bond
+static std::vector<Addr>  bondsBeforePairing;  // to find the new host's bond
 static volatile uint16_t connId = 0;
 static volatile uint16_t mtu = 23;
 static volatile uint16_t connInterval = 0;
@@ -58,6 +71,8 @@ static volatile uint8_t  authFailReason = 0;
 static volatile bool     pairingRejected = false;
 static volatile bool     hostPending = false;   // a host completed pairing / encryption
 static volatile uint8_t  hostPendingSlot;
+static volatile bool     hostPendingFresh;      // ... by pairing (keys exchanged)
+static volatile bool     hostPendingPairing;    // ... while in pairing mode
 static esp_bd_addr_t     hostPendingAddr;
 static esp_bd_addr_t     peerAddr;
 static int               sendableBaseline = -1;
@@ -107,25 +122,94 @@ static void slotName(uint8_t s, char *buf, size_t size)
     snprintf(buf, size, "%s %u", BLE_DEVICE_NAME, s + 1);
 }
 
-// Identity addresses of all bonded hosts (what bonds are keyed by - phones
-// and Macs connect with changing private addresses)
-static std::vector<std::array<uint8_t, 6>> bondList()
+static bool sameAddr(const uint8_t *a, const uint8_t *b)
 {
-    std::vector<std::array<uint8_t, 6>> out;
+    return !memcmp(a, b, 6);
+}
+
+static std::vector<esp_ble_bond_dev_t> bondRecords()
+{
+    std::vector<esp_ble_bond_dev_t> out;
     int n = esp_ble_get_bond_device_num();
     if (n <= 0)
         return out;
-    auto *list = (esp_ble_bond_dev_t *)malloc(n * sizeof(esp_ble_bond_dev_t));
-    if (!list)
-        return out;
-    esp_ble_get_bond_device_list(&n, list);
-    for (int i = 0; i < n; i++) {
-        std::array<uint8_t, 6> a;
-        memcpy(a.data(), list[i].bd_addr, 6);
+    out.resize(n);
+    esp_ble_get_bond_device_list(&n, out.data());
+    out.resize(max(n, 0));
+    return out;
+}
+
+// Identity addresses of all bonded hosts (what bonds are keyed by - phones
+// and Macs connect with changing private addresses)
+static std::vector<Addr> bondList()
+{
+    std::vector<Addr> out;
+    for (auto &b : bondRecords()) {
+        Addr a;
+        memcpy(a.data(), b.bd_addr, 6);
         out.push_back(a);
     }
-    free(list);
     return out;
+}
+
+// Bluetooth Core ah(): a resolvable private address is prand (upper 3 bytes)
+// + hash = AES-128(IRK, 0..0 | prand) mod 2^24 (lower 3 bytes). Bluedroid
+// keeps the IRK as received (LSB first); both byte orders are tried.
+static bool rpaMatches(const uint8_t *irk, const uint8_t *addr, bool lsbFirst)
+{
+    uint8_t key[16], in[16] = {0}, out[16];
+    for (int i = 0; i < 16; i++)
+        key[i] = lsbFirst ? irk[15 - i] : irk[i];
+    memcpy(in + 13, addr, 3);
+    mbedtls_aes_context ctx;
+    mbedtls_aes_init(&ctx);
+    mbedtls_aes_setkey_enc(&ctx, key, 128);
+    mbedtls_aes_crypt_ecb(&ctx, MBEDTLS_AES_ENCRYPT, in, out);
+    mbedtls_aes_free(&ctx);
+    return !memcmp(out + 13, addr + 3, 3);
+}
+
+// The bond a connected host's address belongs to: the bond's own address,
+// its identity address, or a private address resolved with its IRK
+static bool identify(const std::vector<esp_ble_bond_dev_t> &bonds, const uint8_t *addr, Addr &out)
+{
+    static const uint8_t zero[16] = {0};
+    bool rpa = (addr[0] & 0xC0) == 0x40;
+    for (auto &b : bonds) {
+        const esp_ble_pid_keys_t &pid = b.bond_key.pid_key;
+        bool hasIrk = memcmp(pid.irk, zero, 16) != 0;
+        bool hasId  = memcmp(pid.static_addr, zero, 6) != 0;
+        if (sameAddr(b.bd_addr, addr) || (hasId && sameAddr(pid.static_addr, addr))
+            || (rpa && hasIrk && (rpaMatches(pid.irk, addr, true) || rpaMatches(pid.irk, addr, false)))) {
+            memcpy(out.data(), b.bd_addr, 6);
+            return true;
+        }
+    }
+    return false;
+}
+
+// Bonds no slot refers to: a pairing that was not accepted, a replaced host
+static void pruneBonds()
+{
+    for (auto &b : bondList()) {
+        bool used = false;
+        for (auto &s : slots)
+            used |= s.used && sameAddr(s.host, b.data());
+        if (!used) {
+            esp_ble_remove_bond_device(b.data());
+            logf("BLE: stray pairing %02X:%02X:%02X:%02X:%02X:%02X removed", b[0], b[1], b[2], b[3],
+                 b[4], b[5]);
+        }
+    }
+}
+
+static void dropHost(const char *why)
+{
+    if (!connected || dropRequested)
+        return;
+    dropRequested = true;
+    logf("BLE: %s - disconnected", why);
+    esp_ble_gap_disconnect(peerAddr);
 }
 
 // Name + address of the active slot; advertising must be stopped
@@ -150,6 +234,7 @@ static void restartOnSlot()
         advertising = false;
     }
     applySlotIdentity();
+    passkeyShown = false;
     if (connected)
         esp_ble_gap_disconnect(peerAddr);
 }
@@ -179,20 +264,14 @@ class ServerCallbacks : public BLEServerCallbacks {
         mtu = 23;
         connInterval = 0;
         secured = false;
+        authorized = false;
+        keysExchanged = false;
+        dropRequested = false;
+        passkeyShown = false;
         congested = false;
         advertising = false; // legacy advertising stops on connection
         sendableBaseline = -1;
         connectedAtMs = millis();
-
-        // The Arduino BLE library does not persist CCCDs across connections,
-        // and a bonded host does not rewrite them on reconnect: force notify on
-        for (auto *c : inputChr) {
-            if (!c)
-                continue;
-            auto *cccd = (BLE2902 *)c->getDescriptorByUUID(BLEUUID((uint16_t)0x2902));
-            if (cccd)
-                cccd->setNotifications(true);
-        }
         connected = true;
 
         // Keyboard: short interval, no slave latency (powered from USB anyway)
@@ -203,33 +282,42 @@ class ServerCallbacks : public BLEServerCallbacks {
     {
         connected = false;
         secured = false;
+        authorized = false;
+        passkeyShown = false;
         congested = false;
     }
 };
 
 class SecurityCallbacks : public BLESecurityCallbacks {
+    // Display only: the host types the passkey shown on the screen
     uint32_t onPassKeyRequest() override { return 0; }
-    void onPassKeyNotify(uint32_t) override {}
-    bool onConfirmPIN(uint32_t) override { return true; }
+    void onPassKeyNotify(uint32_t key) override
+    {
+        passkey = key;
+        passkeyShown = true;
+        keysExchanged = true;
+    }
+    bool onConfirmPIN(uint32_t) override { return false; } // no yes / no input offered
 
-    // A pairing request: accepted in pairing mode, otherwise only from the
-    // slot's own host (e.g. it lost its keys)
+    // A pairing request: accepted in pairing mode only (a host that lost its
+    // keys pairs again in pairing mode, like a new one)
     bool onSecurityRequest() override
     {
-        const Slot &s = slots[curSlot];
-        bool ok = pairing || (s.used && memcmp(s.host, peerAddr, sizeof(esp_bd_addr_t)) == 0);
-        if (!ok)
+        if (!pairing)
             pairingRejected = true;
-        return ok;
+        return pairing;
     }
 
     void onAuthenticationComplete(esp_ble_auth_cmpl_t r) override
     {
         secured = r.success;
+        passkeyShown = false;
         authFailReason = r.success ? 0 : r.fail_reason;
         if (r.success) {
             memcpy(hostPendingAddr, r.bd_addr, sizeof(esp_bd_addr_t));
             hostPendingSlot = curSlot;
+            hostPendingFresh = keysExchanged;
+            hostPendingPairing = pairing;
             hostPending = true;
         }
     }
@@ -241,7 +329,7 @@ public:
 
     void onWrite(BLECharacteristic *c) override
     {
-        if (!writeCb)
+        if (!writeCb || !authorized)
             return;
         std::string v = c->getValue();
         writeCb(type, id, (const uint8_t *)v.data(), v.size());
@@ -264,6 +352,8 @@ static void gapHandler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *p)
 {
     if (event == ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT && p->update_conn_params.status == ESP_BT_STATUS_SUCCESS)
         connInterval = p->update_conn_params.conn_int;
+    else if (event == ESP_GAP_BLE_KEY_EVT) // keys are only distributed when pairing
+        keysExchanged = true;
 }
 
 // ---------------- HID services ----------------
@@ -275,14 +365,14 @@ static BLECharacteristic *makeReport(BLEService *svc, HidReportType type, uint8_
                                               | BLECharacteristic::PROPERTY_WRITE_NR
                                         : BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE;
     BLECharacteristic *c = svc->createCharacteristic((uint16_t)0x2a4d, props);
-    c->setAccessPermissions(ESP_GATT_PERM_READ_ENCRYPTED | ESP_GATT_PERM_WRITE_ENCRYPTED);
+    c->setAccessPermissions(PERM_RW);
     if (type == HID_INPUT) {
         BLE2902 *cccd = new BLE2902();
-        cccd->setAccessPermissions(ESP_GATT_PERM_READ_ENCRYPTED | ESP_GATT_PERM_WRITE_ENCRYPTED);
+        cccd->setAccessPermissions(PERM_RW);
         c->addDescriptor(cccd);
     }
     BLEDescriptor *ref = new BLEDescriptor(BLEUUID((uint16_t)0x2908));
-    ref->setAccessPermissions(ESP_GATT_PERM_READ_ENCRYPTED | ESP_GATT_PERM_WRITE_ENCRYPTED);
+    ref->setAccessPermissions(PERM_RW);
     uint8_t refVal[] = {refId, (uint8_t)type};
     ref->setValue(refVal, sizeof(refVal));
     c->addDescriptor(ref);
@@ -303,7 +393,7 @@ static void makeAgentService(const std::vector<uint8_t> &agentMap, const std::ve
     uint8_t infoVal[] = {0x11, 0x01, 0x00, 0x02}; // HID 1.11, country 0, normally connectable
     info->setValue(infoVal, sizeof(infoVal));
     BLECharacteristic *map = svc->createCharacteristic((uint16_t)0x2a4b, BLECharacteristic::PROPERTY_READ);
-    map->setAccessPermissions(ESP_GATT_PERM_READ_ENCRYPTED);
+    map->setAccessPermissions(PERM_READ);
     map->setValue((uint8_t *)agentMap.data(), agentMap.size());
     svc->createCharacteristic((uint16_t)0x2a4c, BLECharacteristic::PROPERTY_WRITE_NR); // control point
     for (auto &r : reports) {
@@ -367,9 +457,13 @@ void ble_hid_begin(const std::vector<uint8_t> &reportMap,
     hid->hidInfo(0x00, 0x02); // country 0, normally connectable
     hid->reportMap((uint8_t *)reportMap.data(), reportMap.size());
 
+    // Passkey entry: the adapter shows a 6-digit code, the host types it.
+    // Pairings without it (Just Works, legacy pairing) are refused.
     BLESecurity *sec = new BLESecurity();
-    sec->setAuthenticationMode(ESP_LE_AUTH_REQ_SC_BOND);
-    sec->setCapability(ESP_IO_CAP_NONE); // "Just Works" pairing
+    sec->setAuthenticationMode(ESP_LE_AUTH_REQ_SC_MITM_BOND);
+    sec->setCapability(ESP_IO_CAP_OUT);
+    uint8_t onlySpecified = ESP_BLE_ONLY_ACCEPT_SPECIFIED_AUTH_ENABLE;
+    esp_ble_gap_set_security_param(ESP_BLE_SM_ONLY_ACCEPT_SPECIFIED_SEC_AUTH, &onlySpecified, 1);
     // Take the host's identity key (resolves phones' random addresses), but do
     // not send ours: hosts must bind to the slot's own address, not the chip's
     sec->setInitEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
@@ -384,6 +478,7 @@ void ble_hid_begin(const std::vector<uint8_t> &reportMap,
 
     server->getAdvertising()->setScanResponse(false); // everything fits in the advertisement
     applySlotIdentity();
+    pruneBonds();
 
     started = true;
     logf("BLE: HID service up as %04X:%04X, %u reports, report map %u bytes%s, %d bonded host(s)",
@@ -412,6 +507,100 @@ void ble_hid_set_enabled(bool on)
         }
         if (connected)
             esp_ble_gap_disconnect(peerAddr);
+    }
+}
+
+// Reports flow from here on. The Arduino BLE library does not persist CCCDs
+// across connections and a bonded host does not rewrite them on reconnect:
+// notifications are switched on for it.
+static void authorize()
+{
+    for (auto *c : inputChr) {
+        if (!c)
+            continue;
+        auto *cccd = (BLE2902 *)c->getDescriptorByUUID(BLEUUID((uint16_t)0x2902));
+        if (cccd)
+            cccd->setNotifications(true);
+    }
+    authorized = true;
+    logf("BLE: slot %u host authenticated", curSlot + 1);
+}
+
+// A new pairing in pairing mode: the host becomes the active slot's host
+static void acceptPairing(const Addr &host)
+{
+    uint8_t s = curSlot;
+    Slot &sl = slots[s];
+    // Bluedroid keeps one bond per host: pairing it on this slot replaced
+    // the keys it had for another slot
+    for (uint8_t o = 0; o < BLE_SLOTS; o++) {
+        if (o != s && slots[o].used && sameAddr(slots[o].host, host.data())) {
+            slots[o].used = false;
+            saveSlot(o);
+            logf("BLE: host moved from slot %u to slot %u", o + 1, s + 1);
+        }
+    }
+    if (sl.used) {
+        // A new host replaced the old one: its bond goes, and the slot keeps
+        // the trial address the new host paired on
+        if (!sameAddr(sl.host, host.data()))
+            esp_ble_remove_bond_device(sl.host);
+        sl.gen++;
+    }
+    sl.used = true;
+    memcpy(sl.host, host.data(), 6);
+    saveSlot(s);
+    pairing = false; // done; the advertised address stays (gen committed above)
+    advDiscoverable = false;
+    logf("BLE: slot %u paired with %02X:%02X:%02X:%02X:%02X:%02X", s + 1, host[0], host[1], host[2],
+         host[3], host[4], host[5]);
+}
+
+// Encryption completed: a new pairing, or a bonded host reconnecting (phones
+// and Macs with a fresh private address every time). Bonds are not tied to
+// our address, so the host's identity is checked against the active slot.
+static void onSecured()
+{
+    if (!connected || hostPendingSlot != curSlot)
+        return; // the slot was switched meanwhile: that link is being dropped
+    auto bonds = bondRecords();
+    Addr host;
+    bool newBond = false;
+    if (pairing) {
+        for (auto &b : bonds) {
+            bool known = false;
+            for (auto &o : bondsBeforePairing)
+                known |= sameAddr(o.data(), b.bd_addr);
+            if (!known) {
+                memcpy(host.data(), b.bd_addr, 6);
+                newBond = true;
+            }
+        }
+    }
+    // Outside pairing mode pairing requests are refused: this is a reconnect
+    bool fresh = hostPendingPairing && (hostPendingFresh || newBond);
+    bool known = newBond || identify(bonds, hostPendingAddr, host) || identify(bonds, peerAddr, host);
+
+    if (fresh && pairing) {
+        // The bond is keyed by the host's identity address; a host that
+        // paired again (it lost its keys) keeps its bond entry
+        if (!known)
+            memcpy(host.data(), hostPendingAddr, 6);
+        acceptPairing(host);
+        authorize();
+        if (known)
+            pruneBonds();
+    } else if (fresh) {
+        dropHost("pairing not accepted (pairing mode is over)");
+        pruneBonds();
+    } else if (pairing) {
+        dropHost("a paired host connected in pairing mode");
+    } else if (!known) {
+        dropHost("unknown host");
+    } else if (!slots[curSlot].used || !sameAddr(slots[curSlot].host, host.data())) {
+        dropHost("the host is paired with another slot");
+    } else {
+        authorize();
     }
 }
 
@@ -446,57 +635,20 @@ void ble_hid_poll()
     }
     if (pairingRejected) {
         pairingRejected = false;
-        logf("BLE: pairing refused - hold \"Pair\" on the screen first");
-        if (connected)
-            esp_ble_gap_disconnect(peerAddr);
+        dropHost("pairing refused outside pairing mode (hold BOOT first)");
     }
     if (hostPending) {
         hostPending = false;
-        // Encryption also completes on every reconnect of a bonded host -
-        // with a fresh private address for phones / Macs. Only a pairing in
-        // pairing mode may change the slot.
-        if (pairing && hostPendingSlot == curSlot) {
-            uint8_t s = curSlot;
-            Slot &sl = slots[s];
-            // The new bond's key is the host's identity address
-            std::array<uint8_t, 6> host;
-            memcpy(host.data(), hostPendingAddr, 6);
-            for (auto &b : bondList()) {
-                bool known = false;
-                for (auto &o : bondsBeforePairing)
-                    known |= o == b;
-                if (!known)
-                    host = b;
-            }
-            // Bluedroid keeps one bond per host: pairing it on this slot
-            // replaced the keys it had for another slot
-            for (uint8_t o = 0; o < BLE_SLOTS; o++) {
-                if (o != s && slots[o].used && !memcmp(slots[o].host, host.data(), 6)) {
-                    slots[o].used = false;
-                    saveSlot(o);
-                    logf("BLE: host moved from slot %u to slot %u", o + 1, s + 1);
-                }
-            }
-            if (sl.used) {
-                // A new host replaced the old one: its bond goes, and the
-                // slot keeps the trial address the new host paired on
-                if (memcmp(sl.host, host.data(), 6))
-                    esp_ble_remove_bond_device(sl.host);
-                sl.gen++;
-            }
-            sl.used = true;
-            memcpy(sl.host, host.data(), 6);
-            saveSlot(s);
-            pairing = false; // done; the advertised address stays (gen committed above)
-            advDiscoverable = false;
-            logf("BLE: slot %u paired with %02X:%02X:%02X:%02X:%02X:%02X", s + 1, host[0], host[1],
-                 host[2], host[3], host[4], host[5]);
-        }
+        onSecured();
     }
+    // Only the active slot's host stays connected: a link it has not
+    // encrypted in time is dropped (in pairing mode the window decides)
+    if (connected && !authorized && !pairing && millis() - connectedAtMs > UNSECURED_LINK_MS)
+        dropHost("not authenticated by the slot's host");
     // The window closes on time, but not under a host that is connected and
     // still pairing (Windows reads the services first, then pairs)
     if (pairing && (int32_t)(millis() - pairingUntilMs) >= 0) {
-        bool busy = connected && !secured && millis() - connectedAtMs < 30000;
+        bool busy = connected && !secured && millis() - connectedAtMs < PAIRING_LINK_MS;
         if (!busy) {
             logf("BLE: pairing mode timed out");
             ble_hid_stop_pairing();
@@ -533,7 +685,7 @@ void ble_hid_poll()
 
 bool ble_hid_ready()
 {
-    return connected && (secured || millis() - connectedAtMs > SECURE_FALLBACK_MS);
+    return connected && authorized;
 }
 
 bool ble_hid_can_send()
@@ -622,4 +774,6 @@ void ble_hid_get_status(BleHidStatus &st)
     }
     int32_t left = (int32_t)(pairingUntilMs - millis());
     st.pairingLeftMs = pairing && left > 0 ? left : 0;
+    st.passkeyShown = passkeyShown && connected;
+    st.passkey = passkey;
 }

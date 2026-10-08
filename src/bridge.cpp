@@ -16,7 +16,8 @@ static const char *NVS_KEY_DESC  = "desc";
 // keyboard changes: hosts cache it, so pairings are dropped on upgrade.
 // 3: + keyboard VID:PID, Agent channel in its own HID service
 // 4: Report ID inside the top-level collection, PnP ID byte order fixed
-static const uint8_t BLOB_VERSION = 4;
+// 5: passkey pairing (MITM) - Just Works bonds of older firmware are dropped
+static const uint8_t BLOB_VERSION = 5;
 static const int   MAX_IFACES    = 8;
 static const int   MAX_REPORT    = 64;
 static const int   Q_CAP         = 64;
@@ -54,19 +55,38 @@ static int8_t  agentIface = -1;       // index into ifmaps of the UHK Agent comm
 static uint8_t agentInId = 0;         // internal ID of its input report
 static bool    forgetOnStart = false; // cached map from older firmware: hosts must re-pair
 
-// UHK protocol commands that re-enumerate the keyboard (bootloader / BusPal)
-// or flash firmware: refused over BLE, firmware updates go by cable
-static bool isFirmwareCommand(uint8_t cmd)
+// UHK Agent commands over BLE (UHK firmware usb_protocol_handler.h)
+enum AgentAccess : uint8_t {
+    AGENT_ALWAYS,    // read-only status, Agent polls it
+    AGENT_UNLOCKED,  // only after "Allow" on the adapter's screen
+    AGENT_NEVER,     // firmware updates go by cable
+};
+
+static AgentAccess agentAccess(const uint8_t *cmd, uint16_t len)
 {
-    switch (cmd) {
-    case 0x01: // Reenumerate
+    switch (cmd[0]) {
+    case 0x00: // GetDeviceProperty
+    case 0x09: // GetDeviceState
+    case 0x0b: // GetDebugBuffer
+    case 0x0c: // GetAdcValue
+    case 0x0e: // GetModuleProperty
+    case 0x0f: // GetSlaveI2cErrors
+    case 0x12: // GetVariable
+    case 0x1b: // IsPaired
+    case 0x22: // GetModuleFlashState
+        return AGENT_ALWAYS;
+    case 0x04: // ReadConfig: buffer 0, the hardware config (layout, IDs), is no secret
+        return len > 1 && cmd[1] == 0 ? AGENT_ALWAYS : AGENT_UNLOCKED;
+    case 0x01: // Reenumerate (bootloader / BusPal)
     case 0x02: // JumpToModuleBootloader
     case 0x03: // SendKbootCommandToModule
     case 0x20: // WriteModuleFirmware
     case 0x21: // FlashModule
-        return true;
+        return AGENT_NEVER;
     }
-    return false;
+    // Everything else reads the user config (macros may hold passwords),
+    // changes it, runs macros or otherwise changes the keyboard's state
+    return AGENT_UNLOCKED;
 }
 
 // What UHK Agent looks for: vendor page 0xFF00 usage 1 (old firmware 0x80 / 0x81)
@@ -87,7 +107,13 @@ static volatile bool restartPending = false;
 static uint32_t restartAtMs = 0;
 static const char *volatile note = nullptr;
 static volatile uint32_t statForwarded = 0, statMerged = 0, statDropped = 0;
-static volatile uint32_t agentRefused = 0;
+static volatile uint32_t agentFwRefused = 0, agentLockedRefused = 0;
+// UHK Agent config access, granted on the screen to the connected host: lasts
+// AGENT_UNLOCK_MS after its last such command, ends when the host disconnects
+static volatile bool     agentUnlocked = false;
+static volatile uint32_t agentUnlockUntilMs = 0;
+static volatile bool     agentAsking = false;    // refused while locked: prompt on the screen
+static volatile uint32_t agentAskedAtMs = 0;
 static const char *NOTE_NOT_KEYBOARD = "USB device is not a keyboard (bootloader?)";
 static const char *NOTE_FW_REFUSED   = "firmware update over BLE refused: use cable mode";
 
@@ -391,15 +417,28 @@ static void forwardHostReport(const HostReport &h)
 }
 
 // UHK Agent command from the BLE host: passed straight to the keyboard, never
-// cached / replayed. Firmware update commands get an InvalidCommand reply.
+// cached / replayed. Refused commands get an InvalidCommand reply.
 static void onAgentCommand(HidReportType type, uint8_t id, const uint8_t *data, uint16_t len)
 {
-    if (type == HID_OUTPUT && len && isFirmwareCommand(data[0])) {
+    if (type != HID_OUTPUT || !len)
+        return; // commands are output reports
+    AgentAccess a = agentAccess(data, len);
+    if (a == AGENT_UNLOCKED && agentUnlocked && (int32_t)(millis() - agentUnlockUntilMs) < 0) {
+        agentUnlockUntilMs = millis() + AGENT_UNLOCK_MS; // in use: keep it open
+        a = AGENT_ALWAYS;
+    }
+    if (a != AGENT_ALWAYS) {
         static const uint8_t refused[MAX_REPORT] = {1}; // UsbStatusCode_InvalidCommand
         if (agentInId)
             qPush(agentInId, refused, sizeof(refused));
-        note = NOTE_FW_REFUSED;
-        agentRefused++;
+        if (a == AGENT_NEVER) {
+            note = NOTE_FW_REFUSED;
+            agentFwRefused++;
+        } else {
+            agentAskedAtMs = millis();
+            agentAsking = true;
+            agentLockedRefused++;
+        }
         return;
     }
     HostReport h{type, id, (uint8_t)min<uint16_t>(len, MAX_REPORT), {}};
@@ -619,11 +658,21 @@ void bridge_loop()
     }
     ble_hid_poll();
 
-    static uint32_t loggedRefused = 0;
-    if (agentRefused != loggedRefused) {
-        loggedRefused = agentRefused;
+    static uint32_t loggedFw = 0, loggedLocked = 0;
+    if (agentFwRefused != loggedFw) {
+        loggedFw = agentFwRefused;
         logf("Agent: firmware update command refused over BLE - switch to cable mode");
     }
+    if (agentLockedRefused != loggedLocked) {
+        loggedLocked = agentLockedRefused;
+        logf("Agent: config access refused - allow it on the screen");
+    }
+    if (agentUnlocked && (!ble_hid_ready() || (int32_t)(millis() - agentUnlockUntilMs) >= 0)) {
+        agentUnlocked = false;
+        logf("Agent: config access locked again%s", ble_hid_ready() ? " (idle)" : "");
+    }
+    if (agentAsking && (!ble_hid_ready() || millis() - agentAskedAtMs > AGENT_PROMPT_MS))
+        agentAsking = false;
 
     if (restartPending && millis() - restartAtMs > RESTART_DELAY_MS) {
         if (ble_hid_started())
@@ -636,6 +685,16 @@ void bridge_loop()
     }
 }
 
+void bridge_agent_allow(bool allow)
+{
+    agentAsking = false;
+    if (allow && !ble_hid_ready())
+        return;
+    agentUnlockUntilMs = millis() + AGENT_UNLOCK_MS;
+    agentUnlocked = allow;
+    logf("Agent: config access %s", allow ? "allowed - retry in UHK Agent" : "locked");
+}
+
 void bridge_get_status(BridgeStatus &st)
 {
     st.usbConnected = usbReady;
@@ -645,5 +704,8 @@ void bridge_get_status(BridgeStatus &st)
     st.merged = statMerged;
     st.dropped = statDropped;
     st.agentChannel = !agentMap.empty();
+    int32_t left = (int32_t)(agentUnlockUntilMs - millis());
+    st.agentUnlockedLeftMs = agentUnlocked && left > 0 ? left : 0;
+    st.agentAsking = agentAsking;
     st.note = note;
 }

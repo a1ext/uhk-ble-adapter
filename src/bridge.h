@@ -5,8 +5,9 @@
  * whatever the keyboard firmware declares - NKRO bitfield, mouse with
  * high-resolution scrolling, consumer / system controls - is forwarded
  * unchanged. Of the vendor-defined interfaces only the UHK Agent command
- * channel is kept (BLE_AGENT_CHANNEL); firmware update commands on it are
- * refused. The descriptors are cached in NVS, so after the first run BLE
+ * channel is kept (BLE_AGENT_CHANNEL): read-only status commands pass,
+ * reading / writing the user config, macros etc. need "Allow" on the screen
+ * (bridge_agent_allow), firmware update commands are always refused. The descriptors are cached in NVS, so after the first run BLE
  * advertises right after boot, before the keyboard is enumerated.
  *
  * Input reports go through a FIFO: keyboard reports are never merged (fast
@@ -22,10 +23,13 @@ struct BridgeStatus {
     bool     mapValid;         // BLE report map known
     uint32_t forwarded, merged, dropped;
     bool     agentChannel;     // UHK Agent channel served over BLE
+    bool     agentAsking;      // Agent was refused config access: ask on the screen
+    uint32_t agentUnlockedLeftMs; // > 0 while Agent config access is allowed
     const char *note;          // status message for the screen, may be nullptr
 };
 
 void bridge_begin();
 void bridge_set_bt_mode(bool on);   // starts the USB host / BLE on first use
 void bridge_loop();                 // Arduino loop: deferred BLE start, restarts
+void bridge_agent_allow(bool allow); // screen: allow / lock Agent config access
 void bridge_get_status(BridgeStatus &st);

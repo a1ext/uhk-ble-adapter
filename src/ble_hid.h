@@ -12,8 +12,16 @@
  * drops the current host and makes the active slot discoverable for
  * PAIRING_WINDOW_MS; pairing a used slot replaces its host and moves the slot
  * to a fresh address (the old host cannot keep reconnecting). Pairing
- * requests outside pairing mode are refused unless they come from the slot's
- * own host.
+ * requests outside pairing mode are refused.
+ *
+ * Security: pairing is LE Secure Connections with passkey entry - the
+ * adapter shows a 6-digit code on the screen (BleHidStatus::passkey), the
+ * host types it; Just Works and legacy pairing are refused, all HID / OTA
+ * attributes need such an authenticated link. Bonds are not tied to our
+ * address, so after encryption the host's identity (resolved private
+ * address) must be the active slot's host - otherwise it is disconnected.
+ * Reports flow only after that check (ble_hid_ready); a link that is not
+ * authenticated in time is dropped.
  *
  * Optionally a second HID service carries the UHK Agent command channel: on
  * the host it is a separate HID device without report IDs, like the
@@ -48,6 +56,8 @@ struct BleHidStatus {
     bool     slotUsed[BLE_SLOTS];      // a host is paired on the slot
     uint8_t  slotHost[BLE_SLOTS][6];   // its address
     uint32_t pairingLeftMs;            // > 0 while in pairing mode
+    bool     passkeyShown;             // a host is pairing: show the passkey
+    uint32_t passkey;                  // 6 digits, typed on the host
 };
 
 void ble_hid_init();                // loads the host slots from NVS
@@ -60,7 +70,7 @@ void ble_hid_begin(const std::vector<uint8_t> &reportMap,
 bool ble_hid_started();
 void ble_hid_set_enabled(bool on);  // on: serve the active slot; off: disconnect, stop advertising
 void ble_hid_poll();                // from the Arduino loop
-bool ble_hid_ready();               // connected and encrypted: input reports reach the host
+bool ble_hid_ready();               // the active slot's host, authenticated: reports flow
 bool ble_hid_can_send();            // ready and the controller has room for another notification
 void ble_hid_send(uint8_t id, const uint8_t *data, uint16_t len);
 void ble_hid_select_slot(uint8_t slot);

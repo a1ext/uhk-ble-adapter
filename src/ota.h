@@ -2,7 +2,7 @@
  * Firmware update over BLE (A/B: the inactive app partition is written while
  * the current firmware keeps running).
  *
- * GATT service (encrypted link only, i.e. a bonded host):
+ * GATT service (passkey-paired link of the active slot's host only):
  *   control  OTA_CTRL_UUID  write + notify
  *     host -> adapter  01 <size u32 LE> <sha256 32 B>   begin
  *                      02                               abort

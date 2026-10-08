@@ -53,11 +53,20 @@ Power always comes from the input USB cable (PC or charger).
 - Switching NKRO ↔ 6KRO in Agent changes the keyboard report descriptor (re-enumeration).
 
 ## Firmware updates
+- Fresh board: web installer on GitHub Pages (`docs/index.html` + `docs/manifest.json`,
+  ESP Web Tools 10.4.0, Web Serial: Chrome / Edge / Opera desktop). `tools/pio_extra.py`
+  merges bootloader + partitions + boot_app0 + firmware into
+  `$BUILD_DIR/uhk-ble-adapter.bin` (flash at 0x0, same flash params as upload: DIO, 80 MHz,
+  16 MB) after every build. CI (`.github/workflows/build.yml`): builds on push / PR,
+  deploys `docs/` + the merged image to Pages on push to master and on tags (manifest
+  version = `git describe`), tags `v*` → GitHub release with `-full.bin` and `-ota.bin`.
+  Pages must be enabled once: Settings → Pages → Source: GitHub Actions.
 - USB / UART: `pio run -t upload` (board in cable mode, or BOOT + RST).
 - **Bluetooth (Windows): `pio run -t ota`** → `tools/ble_ota.py` uploads `firmware.bin` to the
   paired adapter through Windows' own GATT connection (no advertising needed). Needs a
   Python with the WinRT projections (`pip install bleak`); `UHK_OTA_PYTHON` selects the
-  interpreter. `src/ota.*`: custom GATT service (encrypted link only), the image goes
+  interpreter. `src/ota.*`: custom GATT service (MITM-encrypted link of the active slot's
+  authenticated host only, `ble_hid_ready()` checked on every write), the image goes
   straight into the inactive app partition (A/B, default_16MB.csv app0/app1) while the
   firmware keeps running; SHA-256 + esp_ota_end validation, then boot partition switch and
   reboot (SEL held in BT mode). Rollback: `verifyRollbackLater()` returns true, the new
@@ -68,8 +77,9 @@ Power always comes from the input USB cable (PC or charger).
 - Upload uses pioarduino's esptool 4.8.9 with `--after watchdog_reset`: over USB-Serial-JTAG
   the default RTS hard reset leaves the chip in the ROM bootloader (black screen).
 - espressif32@6.7.0 = Arduino core 2.0.16 / ESP-IDF 4.4.7; board JSON and vendored
-  `lib/LilyGo-AMOLED-Series` copied from `../../Lilygo/ble-mouse`; lvgl 8.4 / SensorLib /
-  XPowersLib come from `../../Lilygo/LilyGo-AMOLED-Series/libdeps`.
+  `lib/LilyGo-AMOLED-Series` copied from `../../Lilygo/ble-mouse`; lvgl 8.4.0 /
+  SensorLib 0.2.4 / XPowersLib 0.2.7 from the PlatformIO registry (`lib_deps`, pinned to
+  what the LilyGo repo bundles) — the build is self-contained (CI builds it).
 - `Serial` = UART0 (CDC_ON_BOOT=0); logs are mirrored to native USB CDC until the USB host
   takes the PHY, and the log tail is shown on the screen.
 - `src/usb_hid_host.*` — IDF USB Host Library: claims all HID interfaces, reads report
@@ -98,14 +108,42 @@ Power always comes from the input USB cable (PC or charger).
     created with `inst_id` 1: the Arduino BLE lib matches ESP_GATTS_CREATE_EVT by UUID +
     inst_id, with 0/0 it overwrote the main HID service's handle and scrambled its
     characteristic / descriptor handles (reads unanswered → Windows "GATT unreachable", no
-    services; Mac / iOS paired but got no input); firmware commands (0x01
-    Reenumerate, 0x02/0x03 module bootloader / KBOOT, 0x20/0x21 module flash) get an
-    InvalidCommand reply — firmware updates by cable only. The official Agent does not talk
-    to UHK 80 over BLE either (BLE PIDs ≥ 0x8000 are only flagged as `bleDeviceConnected`).
+    services; Mac / iOS paired but got no input). The official Agent does not talk to
+    UHK 80 over BLE either (BLE PIDs ≥ 0x8000 are only flagged as `bleDeviceConnected`).
+  - Agent command filter (`agentAccess()` in bridge.cpp, only output reports are commands):
+    read-only status commands (0x00, 0x09, 0x0b, 0x0c, 0x0e, 0x0f, 0x12, 0x1b, 0x22, and
+    ReadConfig 0x04 of buffer 0 = hardware config) always pass; everything else (user config
+    read / write — macros may hold passwords —, ApplyConfig, SetVariable, ExecMacroCommand,
+    SwitchKeymap, …) needs "Allow" on the screen: a refused command gets InvalidCommand
+    (status 1) and pops up "UHK Agent asks for config access" (Deny / Allow, 30 s). Access
+    lasts 10 min after the last such command and ends when the host disconnects; a "Agent
+    open N min - tap to lock" button shows it. After "Allow", retry in Agent. Firmware
+    commands (0x01 Reenumerate, 0x02/0x03 module bootloader / KBOOT, 0x20/0x21 module flash)
+    are always refused — firmware updates by cable only.
   FIFO: keyboard reports never merged (macros), mouse reports with equal buttons merged by
   summing relative axes; USB polling paused when the FIFO is high (backpressure).
-- `src/ble_hid.*` — Bluedroid BLEHIDDevice, Just Works bonding, MTU 185 (NKRO needs ≥ 32),
-  at most 2 notifications queued in the controller.
+- `src/ble_hid.*` — Bluedroid BLEHIDDevice, MTU 185 (NKRO needs ≥ 32), at most 2
+  notifications queued in the controller.
+  - Security: LE Secure Connections + passkey entry — IO capability DisplayOnly, the
+    6-digit code pops up on the screen, the host types it (`SC_MITM_BOND`,
+    `ESP_BLE_SM_ONLY_ACCEPT_SPECIFIED_SEC_AUTH`: Just Works / legacy pairing refused; in
+    Bluedroid that check compares the *selected association model*, not the peer's AuthReq
+    bits). All HID / Agent / OTA attributes need `*_ENC_MITM`. Bonds of older firmware
+    (Just Works) were dropped with `BLOB_VERSION` 5.
+  - Reports flow only once `authorized` (`ble_hid_ready()`): after encryption the loop
+    checks who it is (`onSecured()`): a pairing in pairing mode (passkey shown / SMP key
+    event / new bond in the bond list) records the slot host; a reconnect must resolve to
+    the ACTIVE slot's host, otherwise it is dropped — Bluedroid bonds are not tied to our
+    (slot) address, any bonded host could connect to any slot address. Identity: bond
+    address, PID static address, or RPA resolved with the bond's IRK (`ah()` via mbedtls
+    AES, Core spec test vector checked; Bluedroid stores the IRK LSB first — both orders are
+    tried). CCCDs are forced on at that point (the Arduino lib does not persist them), host
+    writes before it are ignored. A link not authorized within 10 s (60 s while pairing,
+    passkey typing) is dropped. Bonds no slot refers to are removed at start and after
+    each pairing.
+  - Bluedroid clears a bonded host's keys in RAM as soon as a pairing request arrives,
+    before asking us (`smp_proc_pair_cmd`): a refused pairing attempt that spoofs a host's
+    public address breaks that host until the adapter restarts (DoS only).
   - 3 host slots, each a separate BLE identity: static random address (chip MAC + slot +
     generation) and name "UHK60 BLE n"; our identity key is not distributed, so hosts bind
     to the slot address. Slot = recorded host address (NVS "bleslots").
@@ -118,8 +156,8 @@ Power always comes from the input USB cable (PC or charger).
     on-screen "Pair", hold 1.5 s; while the physical button is held a pink→blue gradient
     bar along the bottom edge shows how long to keep holding): current host dropped, slot discoverable for 20 s; a used slot advertises its
     next-generation address meanwhile, committed when a new host pairs (old bond removed),
-    reverted on cancel / timeout. Pairing requests outside pairing mode are refused unless
-    from the slot's own host.
+    reverted on cancel / timeout. Pairing requests outside pairing mode are always refused
+    (a host that lost its keys pairs again in pairing mode).
   - The slot host is recorded ONLY when pairing completes in pairing mode, as the identity
     address of the new bond (bond list diff). Auth-complete also fires on every reconnect,
     and phones / Macs reconnect with a fresh private address — treating that as a new host
@@ -132,10 +170,14 @@ Power always comes from the input USB cable (PC or charger).
   is applied 250 ms later so the animation stays smooth); vertical slot strip on the right
   with a neon pink bubble that jumps to the tapped slot (bounce animation); slot line +
   "Pair" button (hold 1.5 s = pairing mode, tap during pairing = cancel, countdown shown);
-  status lines, log tail. Strip and pairing controls are hidden in cable mode.
+  status lines, log tail. Strip and pairing controls are hidden in cable mode. Pop-up cards
+  on the top layer: pairing passkey, UHK Agent "allow config access?".
 - Screen: full brightness from boot, dims to 20% after 1 min idle, off after 3 min (AMOLED
-  burn-in); touch / keyboard or BLE state change wakes it. A touch on a dark screen only
-  wakes it (LVGL input is suppressed until release), so it cannot flip the switch blindly.
+  burn-in); touch / keyboard or BLE state change / pop-up wakes it (instantly). Dimming and
+  switching off fade over 2.5 s (`display_fade_to`): interpolated in perceived brightness
+  (level^(1/2.2)) with a cubic ease-out, so the low end does not drop abruptly. A touch on
+  a dark or fading-out screen only wakes it (LVGL input is suppressed until release), so
+  it cannot flip the switch blindly.
 
 ## Troubleshooting notes
 - Windows PC (ASUS ROG Z790 Maximus Dark Hero, Intel Wireless Bluetooth 8087:0036) did not
@@ -150,6 +192,10 @@ Power always comes from the input USB cable (PC or charger).
   reads and writes the configuration over BLE.
 - Re-test after re-pairing: macOS (keys + Agent), iOS (keys; pointer needs AssistiveTouch),
   Android / Pixel (only one HID service is used there — main service is first).
+- Passkey pairing + identity check (security fixes after the adversarial review): test
+  pairing on Windows / macOS / iOS / Android, reconnects with private addresses (Mac /
+  iPhone), and that a host of another slot is dropped. Not done from that review: OTA
+  image signing, flash encryption / secure boot.
 - First real BLE OTA run (`pio run -t ota`).
 - Exact mux pinout (FSUSB42MUX is the part with stock at TME; check its datasheet).
 - Enclosure (3D-printed), two USB-C panel jacks (GCT USB4085-GF-A) + button.

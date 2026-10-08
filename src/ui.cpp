@@ -30,6 +30,7 @@ static bool pairingShown = false;
 static lv_obj_t *statsLabel, *noteLabel, *logLabel;
 static lv_obj_t *strip, *bubble, *slotNum[BLE_SLOTS];
 static lv_obj_t *holdBar;
+static lv_obj_t *passkeyCard, *passkeyLabel, *agentCard, *agentBtn, *agentLabel;
 static lv_coord_t cellH;
 static uint8_t shownSlot = 0xFF;
 
@@ -281,6 +282,106 @@ static void makeHoldBar()
     lv_obj_add_flag(holdBar, LV_OBJ_FLAG_HIDDEN);
 }
 
+// ---------------- Pop-ups (top layer) ----------------
+// Dark card with a neon rim and glow, centered over everything
+static lv_obj_t *makeCard()
+{
+    lv_obj_t *c = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(c, lv_disp_get_hor_res(nullptr) - 96, LV_SIZE_CONTENT);
+    lv_obj_center(c);
+    lv_obj_set_style_bg_color(c, lv_color_hex(0x111114), 0);
+    lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(c, 1, 0);
+    lv_obj_set_style_border_color(c, lv_color_hex(COLOR_NEON), 0);
+    lv_obj_set_style_radius(c, 20, 0);
+    lv_obj_set_style_shadow_color(c, lv_color_hex(COLOR_NEON), 0);
+    lv_obj_set_style_shadow_width(c, 30, 0);
+    lv_obj_set_style_shadow_opa(c, LV_OPA_40, 0);
+    lv_obj_set_style_pad_all(c, 14, 0);
+    lv_obj_set_style_pad_row(c, 6, 0);
+    lv_obj_set_flex_flow(c, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(c, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(c, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(c, LV_OBJ_FLAG_HIDDEN);
+    return c;
+}
+
+// Pairing passkey: the host types it
+static void makePasskeyCard()
+{
+    passkeyCard = makeCard();
+    lv_obj_t *t = makeLabel(passkeyCard, &lv_font_montserrat_16, COLOR_DIM);
+    lv_label_set_text(t, LV_SYMBOL_BLUETOOTH " Pairing code");
+    passkeyLabel = makeLabel(passkeyCard, &lv_font_montserrat_48, 0xFFFFFF);
+    lv_obj_set_style_text_letter_space(passkeyLabel, 4, 0);
+    lv_obj_t *h = makeLabel(passkeyCard, &lv_font_montserrat_14, COLOR_NEON_HI);
+    lv_label_set_text(h, "Type it on the device you are pairing");
+}
+
+static void agentEvent(lv_event_t *e)
+{
+    if (cbs.onAgentAllow)
+        cbs.onAgentAllow(lv_event_get_user_data(e) != nullptr);
+}
+
+static lv_obj_t *makeCardButton(lv_obj_t *parent, const char *text, bool primary)
+{
+    lv_obj_t *b = lv_btn_create(parent);
+    lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_shadow_width(b, primary ? 18 : 0, 0);
+    lv_obj_set_style_shadow_color(b, lv_color_hex(COLOR_NEON), 0);
+    lv_obj_set_style_shadow_opa(b, LV_OPA_50, 0);
+    lv_obj_set_style_bg_color(b, lv_color_hex(primary ? COLOR_NEON : COLOR_TRACK), 0);
+    if (primary) {
+        lv_obj_set_style_bg_grad_color(b, lv_color_hex(COLOR_BT), 0);
+        lv_obj_set_style_bg_grad_dir(b, LV_GRAD_DIR_HOR, 0);
+    }
+    lv_obj_set_style_pad_hor(b, 26, 0);
+    lv_obj_set_style_pad_ver(b, 10, 0);
+    lv_obj_set_ext_click_area(b, 8);
+    lv_obj_t *l = makeLabel(b, &lv_font_montserrat_18, primary ? 0xFFFFFF : COLOR_TEXT);
+    lv_label_set_text(l, text);
+    lv_obj_center(l);
+    lv_obj_add_event_cb(b, agentEvent, LV_EVENT_CLICKED, primary ? (void *)1 : nullptr);
+    return b;
+}
+
+// UHK Agent was refused config access: allow it for the connected host?
+static void makeAgentCard()
+{
+    agentCard = makeCard();
+    lv_obj_t *t = makeLabel(agentCard, &lv_font_montserrat_18, COLOR_TEXT);
+    lv_label_set_text(t, LV_SYMBOL_SETTINGS " UHK Agent asks for config access");
+    lv_obj_t *h = makeLabel(agentCard, &lv_font_montserrat_14, COLOR_DIM);
+    lv_label_set_text(h, "Keymaps and macros, read and write,\nfrom the connected host");
+    lv_obj_set_style_text_align(h, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_t *row = makeContainer(agentCard, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(row, 18, 0);
+    lv_obj_set_style_pad_top(row, 6, 0);
+    makeCardButton(row, "Deny", false);
+    makeCardButton(row, "Allow", true);
+}
+
+// While Agent config access is open: tap to lock it again
+static lv_obj_t *makeAgentButton(lv_obj_t *parent)
+{
+    lv_obj_t *b = lv_btn_create(parent);
+    lv_obj_set_style_bg_opa(b, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_bg_opa(b, LV_OPA_40, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(b, lv_color_hex(COLOR_BT), LV_STATE_PRESSED);
+    lv_obj_set_style_border_width(b, 1, 0);
+    lv_obj_set_style_border_color(b, lv_color_hex(COLOR_BT), 0);
+    lv_obj_set_style_shadow_width(b, 0, 0);
+    lv_obj_set_style_radius(b, 16, 0);
+    lv_obj_set_style_pad_hor(b, 10, 0);
+    lv_obj_set_style_pad_ver(b, 5, 0);
+    agentLabel = makeLabel(b, &lv_font_montserrat_12, COLOR_TEXT);
+    lv_obj_center(agentLabel);
+    lv_obj_add_event_cb(b, agentEvent, LV_EVENT_CLICKED, nullptr); // lock
+    lv_obj_add_flag(b, LV_OBJ_FLAG_HIDDEN);
+    return b;
+}
+
 void ui_set_hold_progress(uint16_t permille)
 {
     static int shown = -1;
@@ -335,6 +436,7 @@ void ui_begin(const UiCallbacks &cb)
     lv_obj_set_style_pad_column(slotRow, 10, 0);
     slotLabel = makeLabel(slotRow, &lv_font_montserrat_14, COLOR_NEON_HI);
     pairBtn = makePairButton(slotRow);
+    agentBtn = makeAgentButton(slotRow);
 
     statsLabel = makeLabel(left, &lv_font_montserrat_12, COLOR_DIM);
     noteLabel  = makeLabel(left, &lv_font_montserrat_14, COLOR_NOTE);
@@ -347,6 +449,8 @@ void ui_begin(const UiCallbacks &cb)
     makeStrip(scr);
     layoutStrip();
     makeHoldBar();
+    makeAgentCard();
+    makePasskeyCard();
 }
 
 void ui_update(bool btMode, const char *bootNote)
@@ -403,7 +507,8 @@ void ui_update(bool btMode, const char *bootNote)
         snprintf(buf, sizeof(buf), LV_SYMBOL_BLUETOOTH " waiting for the keyboard layout");
     } else if (ble.connected) {
         int n = snprintf(buf, sizeof(buf), LV_SYMBOL_BLUETOOTH " %s, MTU %u",
-                         ble.ready ? "connected" : "pairing...", ble.mtu);
+                         ble.ready ? "connected" : ble.passkeyShown ? "pairing" : "authenticating...",
+                         ble.mtu);
         if (ble.interval)
             snprintf(buf + n, sizeof(buf) - n, ", %u.%02u ms", ble.interval * 125 / 100,
                      ble.interval * 125 % 100);
@@ -435,6 +540,20 @@ void ui_update(bool btMode, const char *bootNote)
         snprintf(buf, sizeof(buf), LV_SYMBOL_REFRESH " %s (hold)", used ? "Pair new device" : "Pair device");
     setText(pairLabel, buf);
     setVisible(pairBtn, ble.started);
+
+    setVisible(agentBtn, bs.agentUnlockedLeftMs > 0);
+    if (bs.agentUnlockedLeftMs) {
+        snprintf(buf, sizeof(buf), LV_SYMBOL_SETTINGS " Agent open %u min - tap to lock",
+                 (unsigned)((bs.agentUnlockedLeftMs + 59999) / 60000));
+        setText(agentLabel, buf);
+    }
+    setVisible(passkeyCard, btMode && ble.passkeyShown);
+    if (ble.passkeyShown) {
+        snprintf(buf, sizeof(buf), "%03lu %03lu", (unsigned long)(ble.passkey / 1000),
+                 (unsigned long)(ble.passkey % 1000));
+        setText(passkeyLabel, buf);
+    }
+    setVisible(agentCard, btMode && bs.agentAsking && !ble.passkeyShown);
 
     snprintf(buf, sizeof(buf), "fw %s %s | reports: %lu sent, %lu merged, %lu dropped", __DATE__,
              __TIME__, (unsigned long)bs.forwarded, (unsigned long)bs.merged, (unsigned long)bs.dropped);
