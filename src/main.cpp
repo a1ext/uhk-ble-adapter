@@ -214,7 +214,8 @@ void setup()
     gpio_hold_dis(PIN_MUX_SEL);
 
     log_begin();
-    logf("UHK BLE adapter, reset reason %d, saved mode %s", reason, savedBt ? "BT" : "cable");
+    logf("UHK BLE adapter, fw %s %s, reset reason %d, saved mode %s", __DATE__, __TIME__, reason,
+         savedBt ? "BT" : "cable");
     ota_init();
     if (crashed && savedBt) {
         bootNote = "recovered from a crash: cable mode";

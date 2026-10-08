@@ -436,8 +436,8 @@ void ui_update(bool btMode, const char *bootNote)
     setText(pairLabel, buf);
     setVisible(pairBtn, ble.started);
 
-    snprintf(buf, sizeof(buf), "reports: %lu sent, %lu merged, %lu dropped",
-             (unsigned long)bs.forwarded, (unsigned long)bs.merged, (unsigned long)bs.dropped);
+    snprintf(buf, sizeof(buf), "fw %s %s | reports: %lu sent, %lu merged, %lu dropped", __DATE__,
+             __TIME__, (unsigned long)bs.forwarded, (unsigned long)bs.merged, (unsigned long)bs.dropped);
     setText(statsLabel, buf);
 
     OtaStatus ota;
