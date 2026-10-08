@@ -1,0 +1,5 @@
+{
+  "name": "LilyGo-AMOLED-Series",
+  "version": "1.2.0",
+  "description": "LilyGo AMOLED board support (vendored from ../LilyGo-AMOLED-Series, src only)"
+}
