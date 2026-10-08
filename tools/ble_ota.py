@@ -4,7 +4,7 @@ Uses Windows' own connection to the paired adapter (WinRT GATT), so the
 adapter does not need to advertise. Protocol: see src/ota.h.
 
     python tools/ble_ota.py .pio/build/t-display-s3-amoled-plus/firmware.bin
-    pio run -t ota            (same, via tools/pio_ota.py)
+    pio run -t ota            (same, via tools/pio_extra.py)
 
 Needs the WinRT Python projections, e.g. `pip install bleak` (pulls them in).
 """

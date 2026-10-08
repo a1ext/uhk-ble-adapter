@@ -1,0 +1,100 @@
+name: Build firmware
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # git describe needs the tags
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            .pio/libdeps
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Build
+        run: pio run -e t-display-s3-amoled-plus
+
+      - name: Package web installer and binaries
+        run: |
+          VERSION=$(git describe --tags --always --dirty)
+          B=.pio/build/t-display-s3-amoled-plus
+          mkdir -p site/firmware dist
+          cp -r docs/. site/
+          cp $B/uhk-ble-adapter.bin site/firmware/
+          cp $B/uhk-ble-adapter.bin dist/uhk-ble-adapter-$VERSION-full.bin
+          cp $B/firmware.bin dist/uhk-ble-adapter-$VERSION-ota.bin
+          python - "$VERSION" <<'EOF'
+          import json, sys
+          path = "site/manifest.json"
+          m = json.load(open(path))
+          m["version"] = sys.argv[1]
+          json.dump(m, open(path, "w"), indent=2)
+          EOF
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uhk-ble-adapter-${{ env.VERSION }}
+          path: dist/
+
+      - uses: actions/upload-pages-artifact@v3
+        if: github.event_name != 'pull_request'
+        with:
+          path: site
+
+  # Web installer on GitHub Pages (Settings -> Pages -> Source: GitHub Actions)
+  pages:
+    needs: build
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
+
+  # Version tags (v1.0, ...) also get a GitHub release with both images:
+  # *-full.bin = flash at 0x0 (fresh board), *-ota.bin = for tools/ble_ota.py
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.bin
+          generate_release_notes: true
