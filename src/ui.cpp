@@ -22,15 +22,14 @@ static const uint32_t COLOR_GREEN   = 0x39FF6A; // typing statistics
 
 static const uint32_t COLOR_VIOLET  = 0xA23BFF; // active pad gradient
 
-// Slot selector: a little PCB, gold pads on a black solder mask
+// Slot selector: a little PCB, gold pads and copper traces
 static const uint32_t PCB_MASK    = 0x0B0E0C;
-static const uint32_t PCB_EDGE    = 0x1F2A24;
 static const uint32_t PCB_COPPER  = 0x6A5420; // traces under the mask
 static const uint32_t PCB_GOLD    = 0xD9B342;
 static const uint32_t PCB_GOLD_HI = 0xF2D46A;
 static const uint32_t PCB_GOLD_DK = 0xA9822A;
 
-static const lv_coord_t STRIP_W        = 100; // slot selector column
+static const lv_coord_t STRIP_W        = 116; // slot selector column (also the tap area)
 static const lv_coord_t PAD_MARGIN     = 26;  // first / last pad centre from the column ends
 static const lv_coord_t PAD_HALF       = 15;  // pads are 30 x 30
 static const lv_coord_t PAD_OFFSET     = 27;  // pad centre from the bus
@@ -171,13 +170,6 @@ static void stripDrawEvent(lv_event_t *e)
     float pop = slotAnimT <= SPARK_END ? 0 : (slotAnimT - SPARK_END) / (float)(1000 - SPARK_END);
 
     lv_draw_rect_dsc_t d;
-    lv_draw_rect_dsc_init(&d);
-    d.radius = 10;
-    d.bg_color = lv_color_hex(PCB_MASK);
-    d.border_color = lv_color_hex(PCB_EDGE);
-    d.border_width = 1;
-    lv_area_t board = {(lv_coord_t)(a.x1 + 1), a.y1, (lv_coord_t)(a.x2 - 1), a.y2};
-    lv_draw_rect(ctx, &d, &board);
 
     // Bus, lit from the via down to the active slot; while switching, the
     // lit end runs from the old junction to the new one

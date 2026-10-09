@@ -175,8 +175,9 @@ pin (USB port or charger).
   descriptor-change restarts — a crash loses at most an hour.
 - `src/ui.*` — title = the active slot's BLE name ("UHK60 BLE n"; blue when the host is
   authenticated, neon while pairing, grey otherwise); slot selector on the right: a
-  little PCB (custom draw on the strip object): black solder mask, a copper bus from a
-  via at the top, one pad per slot branching left / right with a 45° jog and an "S1..S5"
+  little PCB (custom draw on the 116 px strip object, no board outline; each slot's tap
+  area is its whole row): a copper bus from a via at the top, one pad per slot branching
+  left / right with a 45° jog and an "S1..S5"
   silkscreen label (gold pad = host paired, empty gold ring = free). The bus is lit neon
   from the via to the active slot, whose pad glows (rect shadow); on a tap the lit end runs
   down the bus with a spark (ease-in-out), the old pad fades, then the new one lights up
