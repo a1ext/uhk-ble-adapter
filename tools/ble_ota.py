@@ -26,7 +26,7 @@ from winrt.windows.storage.streams import DataReader, DataWriter
 SERVICE = uuid.UUID("6a1e0100-2b5e-4f8a-9c3d-75ab8e4f0a01")
 CTRL = uuid.UUID("6a1e0101-2b5e-4f8a-9c3d-75ab8e4f0a01")
 DATA = uuid.UUID("6a1e0102-2b5e-4f8a-9c3d-75ab8e4f0a01")
-WINDOW = 12 * 1024           # bytes in flight beyond the last ack (adapter buffers 16 KB)
+WINDOW = 4 * 1024            # bytes in flight beyond the last ack; 12 KB (~63 KB/s) crashed the adapter
 ERASE_TIMEOUT = 60           # s, the adapter erases the target partition first
 ERRORS = {0x81: "begin failed", 0x82: "overflow", 0x83: "flash write failed", 0x84: "image rejected",
           0x85: "SHA-256 mismatch", 0x86: "bad size", 0x87: "aborted", 0x88: "timeout"}
@@ -62,6 +62,8 @@ async def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("firmware")
     ap.add_argument("--name", default="UHK60 BLE", help="device name prefix")
+    ap.add_argument("--window", type=int, default=WINDOW,
+                    help="bytes in flight beyond the last ack (smaller = slower, gentler)")
     args = ap.parse_args()
 
     image = open(args.firmware, "rb").read()
@@ -121,7 +123,7 @@ async def main():
     chunk = max(20, session.max_pdu_size - 3)
     acked, sent, t0, shown = 0, 0, time.time(), -1
     while acked < len(image):
-        while sent < len(image) and sent - acked < WINDOW:
+        while sent < len(image) and sent - acked < args.window:
             part = image[sent:sent + chunk]
             st = await data.write_value_with_option_async(buffer(part), GattWriteOption.WRITE_WITHOUT_RESPONSE)
             if st != GattCommunicationStatus.SUCCESS:
