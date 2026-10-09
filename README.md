@@ -150,6 +150,17 @@ plus the firmware on every push to `master` and deploys it to GitHub Pages
 create a release. For tags to deploy too, allow `v*` under **Settings →
 Environments → github-pages**.
 
+The screenshots in `docs/img` are rendered from the real UI code (`src/ui.cpp`
+with LVGL, on a PC) after UI changes, not in CI:
+
+```bash
+python tools/ui_sim/render.py
+```
+
+It needs gcc / g++ on PATH (on Windows e.g. TDM-GCC or MSYS2 MinGW), Pillow
+(`pip install pillow`) and LVGL from PlatformIO (`pio run` once). The scenes
+and their canned data are in `tools/ui_sim/sim.cpp`.
+
 ### Over Bluetooth (OTA, from Windows) — the usual way
 
 No cables: the new image is written to the second app slot while the adapter

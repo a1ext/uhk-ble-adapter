@@ -186,8 +186,12 @@ pin (USB port or charger).
   (keys | clicks | mouse distance); slot line +
   "Pair" button (hold 1.5 s = pairing mode, tap during pairing = cancel, countdown shown);
   status lines, log tail. Pop-up cards on the top layer: pairing passkey, UHK Agent "allow
-  config access?". README / Pages screenshots (`docs/img/screen-*.png`) were rendered from
-  `src/ui.cpp` with LVGL on a PC (TDM-GCC, stubbed status functions, canned data).
+  config access?". README / Pages screenshots (`docs/img/screen-*.png`) are rendered from
+  `src/ui.cpp` with LVGL on a PC: `python tools/ui_sim/render.py` (gcc/g++ — TDM-GCC here —
+  Pillow, LVGL from .pio/libdeps; objects cached in .pio/ui_sim; scenes + stubbed status
+  in `tools/ui_sim/sim.cpp`; __DATE__/__TIME__ = last commit time so renders are
+  reproducible; also leaves anim-*.png slot-switch frames in .pio/ui_sim). Re-render
+  after UI changes; not done in CI.
 - Screen: full brightness from boot, dims to 20% after 1 min idle, off after 3 min (AMOLED
   burn-in); touch / keyboard or BLE state change / pop-up wakes it (instantly). Dimming and
   switching off fade over 2.5 s (`display_fade_to`): interpolated in perceived brightness

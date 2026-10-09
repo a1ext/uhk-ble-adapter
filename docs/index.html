@@ -77,6 +77,9 @@
     .dim { color: var(--dim); }
     p.warn { margin: 16px 0; }
     figure { margin: 16px 0; }
+    .hero { margin: 0 0 28px; }
+    .gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin: 20px 0 0; }
+    .gallery figure { margin: 0; }
     figure img { display: block; width: 100%; height: auto; border-radius: 18px; }
     figcaption { color: var(--dim); font-size: 14px; margin-top: 8px; }
     table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 15px; }
@@ -93,6 +96,10 @@
     The board becomes the keyboard's USB host and a Bluetooth keyboard and mouse for up to five
     computers, tablets or phones, and UHK Agent works over Bluetooth too.
   </p>
+
+  <figure class="hero">
+    <img src="img/screen-bt.png" alt="The adapter's screen: the active slot's name, keyboard and Bluetooth status, typing statistics, and the slot selector with slot 3 active" width="1128" height="536">
+  </figure>
 
   <div class="card install">
     <esp-web-install-button manifest="manifest.json">
@@ -125,6 +132,16 @@
       then pair <b>UHK60 BLE 1…5</b> on the computer or phone within 20 s and type the 6-digit code
       the adapter shows.</li>
   </ul>
+  <div class="gallery">
+    <figure>
+      <img src="img/screen-passkey.png" alt="Pairing pop-up showing the 6-digit code 482 913" width="1128" height="536">
+      <figcaption>Pairing a new host: type the code it shows on that host.</figcaption>
+    </figure>
+    <figure>
+      <img src="img/screen-agent.png" alt="Pop-up: UHK Agent asks for config access, with Deny and Allow buttons" width="1128" height="536">
+      <figcaption>UHK Agent asks before reading or changing the keyboard's config: tap Allow, then retry in Agent.</figcaption>
+    </figure>
+  </div>
 
   <h2 id="build">Build the adapter</h2>
   <p>
