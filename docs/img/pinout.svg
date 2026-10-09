@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 620" role="img" aria-labelledby="t d">
+  <title id="t">T-Display-S3 AMOLED Plus header pins used by the adapter</title>
+  <desc id="d">Back view of the board, USB-C at the bottom. Left header from the top: 3V3, IO1, IO2, IO3, IO10, IO11 to IO15, GND, VBUS, VBUS, IO16. Right header: GND, GND, IO46 to IO40, GND, GND, 3V3, VBAT, IO39. Used: VBUS = +5 V in and GND; the keyboard plugs into the USB-C port; the BOOT button is the pairing button.</desc>
+  <style>
+    text { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; fill: #e8e8ec; }
+    .pin { font-size: 13px; font-weight: 600; text-anchor: middle; dominant-baseline: central; }
+    .note { font-size: 13px; dominant-baseline: central; }
+    .dim { fill: #6e6e73; }
+    .small { font-size: 12px; fill: #8e8e93; }
+  </style>
+  <rect width="760" height="620" rx="22" fill="#0b0b0d"/>
+
+  <!-- board, back view -->
+  <rect x="270" y="40" width="220" height="530" rx="30" fill="#141418" stroke="#2c2c30" stroke-width="2"/>
+  <rect x="345" y="560" width="70" height="26" rx="8" fill="#2c2c30" stroke="#48484a"/>
+  <text x="380" y="604" class="small" text-anchor="middle">USB-C (native USB: to the keyboard)</text>
+  <text x="380" y="70" class="small" text-anchor="middle">antenna end</text>
+  <text x="380" y="300" class="small" text-anchor="middle">back view</text>
+  <text x="380" y="318" class="small" text-anchor="middle">(screen facing down)</text>
+  <rect x="263" y="512" width="10" height="26" rx="3" fill="#48484a"/>
+  <text x="285" y="525" class="small" dominant-baseline="central">RST</text>
+  <rect x="487" y="512" width="10" height="26" rx="3" fill="#ff2ec4"/>
+  <text x="475" y="525" class="small" text-anchor="end" dominant-baseline="central" style="fill:#ff9be6">BOOT</text>
+  <line x1="497" y1="525" x2="548" y2="525" stroke="#ff2ec4" stroke-width="2"/>
+  <text x="554" y="525" class="note" style="fill:#ff9be6; font-weight:600">BOOT = pairing button</text>
+  <text x="554" y="543" class="small">hold 1.5 s: pair a new host</text>
+  <text x="554" y="559" class="small">hold at power-up / Reset:</text>
+  <text x="554" y="575" class="small">bootloader for USB flashing</text>
+
+  <!-- left header: y = 100 + 30 * i -->
+  <g>
+    <rect x="216" y="88" width="48" height="24" rx="6" fill="#1c1c1e"/><text x="240" y="100" class="pin dim">3V3</text>
+    <rect x="216" y="118" width="48" height="24" rx="6" fill="#1c1c1e"/><text x="240" y="130" class="pin dim">1</text>
+    <rect x="216" y="148" width="48" height="24" rx="6" fill="#1c1c1e"/><text x="240" y="160" class="pin dim">2</text>
+    <rect x="216" y="178" width="48" height="24" rx="6" fill="#1c1c1e"/><text x="240" y="190" class="pin dim">3</text>
+    <rect x="216" y="208" width="48" height="24" rx="6" fill="#1c1c1e"/><text x="240" y="220" class="pin dim">10</text>
+    <rect x="216" y="238" width="48" height="24" rx="6" fill="#1c1c1e"/><text x="240" y="250" class="pin dim">11</text>
+    <rect x="216" y="268" width="48" height="24" rx="6" fill="#1c1c1e"/><text x="240" y="280" class="pin dim">12</text>
+    <rect x="216" y="298" width="48" height="24" rx="6" fill="#1c1c1e"/><text x="240" y="310" class="pin dim">13</text>
+    <rect x="216" y="328" width="48" height="24" rx="6" fill="#1c1c1e"/><text x="240" y="340" class="pin dim">14</text>
+    <rect x="216" y="358" width="48" height="24" rx="6" fill="#1c1c1e"/><text x="240" y="370" class="pin dim">15</text>
+    <rect x="216" y="388" width="48" height="24" rx="6" fill="#8e8e93" fill-opacity=".2" stroke="#8e8e93"/><text x="240" y="400" class="pin">GND</text>
+    <rect x="216" y="418" width="48" height="24" rx="6" fill="#ff453a" fill-opacity=".22" stroke="#ff453a"/><text x="240" y="430" class="pin">VBUS</text>
+    <rect x="216" y="448" width="48" height="24" rx="6" fill="#ff453a" fill-opacity=".22" stroke="#ff453a"/><text x="240" y="460" class="pin">VBUS</text>
+    <rect x="216" y="478" width="48" height="24" rx="6" fill="#1c1c1e"/><text x="240" y="490" class="pin dim">16</text>
+  </g>
+  <g fill="#3a3a3c">
+    <circle cx="290" cy="100" r="6"/><circle cx="290" cy="130" r="6"/><circle cx="290" cy="160" r="6"/><circle cx="290" cy="190" r="6"/>
+    <circle cx="290" cy="220" r="6"/><circle cx="290" cy="250" r="6"/><circle cx="290" cy="280" r="6"/><circle cx="290" cy="310" r="6"/>
+    <circle cx="290" cy="340" r="6"/><circle cx="290" cy="370" r="6"/><circle cx="290" cy="400" r="6"/><circle cx="290" cy="430" r="6"/>
+    <circle cx="290" cy="460" r="6"/><circle cx="290" cy="490" r="6"/>
+    <circle cx="470" cy="100" r="6"/><circle cx="470" cy="130" r="6"/><circle cx="470" cy="160" r="6"/><circle cx="470" cy="190" r="6"/>
+    <circle cx="470" cy="220" r="6"/><circle cx="470" cy="250" r="6"/><circle cx="470" cy="280" r="6"/><circle cx="470" cy="310" r="6"/>
+    <circle cx="470" cy="340" r="6"/><circle cx="470" cy="370" r="6"/><circle cx="470" cy="400" r="6"/><circle cx="470" cy="430" r="6"/>
+    <circle cx="470" cy="460" r="6"/><circle cx="470" cy="490" r="6"/>
+  </g>
+  <g fill="none" stroke-width="2">
+    <line x1="264" y1="400" x2="284" y2="400" stroke="#8e8e93"/>
+    <line x1="264" y1="430" x2="284" y2="430" stroke="#ff453a"/>
+    <line x1="264" y1="460" x2="284" y2="460" stroke="#ff453a"/>
+  </g>
+  <text x="206" y="400" class="note" text-anchor="end">GND (common)</text>
+  <text x="206" y="445" class="note" text-anchor="end" style="font-weight:600; fill:#ff8a80">+5 V in (either pin)</text>
+
+  <!-- right header -->
+  <g>
+    <rect x="496" y="88" width="48" height="24" rx="6" fill="#8e8e93" fill-opacity=".2" stroke="#8e8e93"/><text x="520" y="100" class="pin">GND</text>
+    <rect x="496" y="118" width="48" height="24" rx="6" fill="#8e8e93" fill-opacity=".2" stroke="#8e8e93"/><text x="520" y="130" class="pin">GND</text>
+    <rect x="496" y="148" width="48" height="24" rx="6" fill="#1c1c1e"/><text x="520" y="160" class="pin dim">46</text>
+    <rect x="496" y="178" width="48" height="24" rx="6" fill="#1c1c1e"/><text x="520" y="190" class="pin dim">45</text>
+    <rect x="496" y="208" width="48" height="24" rx="6" fill="#1c1c1e"/><text x="520" y="220" class="pin dim">44</text>
+    <rect x="496" y="238" width="48" height="24" rx="6" fill="#1c1c1e"/><text x="520" y="250" class="pin dim">43</text>
+    <rect x="496" y="268" width="48" height="24" rx="6" fill="#1c1c1e"/><text x="520" y="280" class="pin dim">42</text>
+    <rect x="496" y="298" width="48" height="24" rx="6" fill="#1c1c1e"/><text x="520" y="310" class="pin dim">41</text>
+    <rect x="496" y="328" width="48" height="24" rx="6" fill="#1c1c1e"/><text x="520" y="340" class="pin dim">40</text>
+    <rect x="496" y="358" width="48" height="24" rx="6" fill="#8e8e93" fill-opacity=".2" stroke="#8e8e93"/><text x="520" y="370" class="pin">GND</text>
+    <rect x="496" y="388" width="48" height="24" rx="6" fill="#8e8e93" fill-opacity=".2" stroke="#8e8e93"/><text x="520" y="400" class="pin">GND</text>
+    <rect x="496" y="418" width="48" height="24" rx="6" fill="#1c1c1e"/><text x="520" y="430" class="pin dim">3V3</text>
+    <rect x="496" y="448" width="48" height="24" rx="6" fill="#1c1c1e"/><text x="520" y="460" class="pin dim">VBAT</text>
+    <rect x="496" y="478" width="48" height="24" rx="6" fill="#1c1c1e"/><text x="520" y="490" class="pin dim">39</text>
+  </g>
+  <g fill="none" stroke-width="2">
+    <line x1="476" y1="100" x2="496" y2="100" stroke="#8e8e93"/>
+    <line x1="476" y1="130" x2="496" y2="130" stroke="#8e8e93"/>
+    <line x1="476" y1="370" x2="496" y2="370" stroke="#8e8e93"/>
+    <line x1="476" y1="400" x2="496" y2="400" stroke="#8e8e93"/>
+  </g>
+  <text x="554" y="115" class="note">GND</text>
+  <text x="554" y="385" class="note">GND</text>
+  <text x="554" y="460" class="small">leave unconnected</text>
+  <text x="554" y="476" class="small">(no battery)</text>
+</svg>

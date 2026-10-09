@@ -28,8 +28,8 @@ struct BridgeStatus {
     const char *note;          // status message for the screen, may be nullptr
 };
 
-void bridge_begin();
-void bridge_set_bt_mode(bool on);   // starts the USB host / BLE on first use
+void bridge_begin();                // loads the cached HID map and the BLE host slots
+void bridge_start();                // starts the USB host and (with a known map) BLE
 void bridge_loop();                 // Arduino loop: deferred BLE start, restarts
 void bridge_agent_allow(bool allow); // screen: allow / lock Agent config access
 void bridge_get_status(BridgeStatus &st);

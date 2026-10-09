@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 400" role="img" aria-labelledby="t d">
+  <title id="t">Adapter wiring</title>
+  <desc id="d">A USB-C power jack with 5.1 kilo-ohm resistors from CC1 and CC2 to ground feeds +5 V through a polyfuse into the board's VBUS header pin, with a 100 to 220 microfarad capacitor across +5 V and ground. The keyboard plugs into the board's USB-C port, directly or through a panel USB-C jack wired to a USB-C plug breakout.</desc>
+  <style>
+    text { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; fill: #e8e8ec; }
+    .h { font-size: 15px; font-weight: 600; }
+    .s { font-size: 12.5px; fill: #a1a1a6; }
+    .l { font-size: 12.5px; }
+    .box { fill: #141418; stroke: #3a3a3c; stroke-width: 1.5; }
+    .pwr { stroke: #ff453a; stroke-width: 3; fill: none; stroke-linejoin: round; }
+    .gnd { stroke: #8e8e93; stroke-width: 3; fill: none; stroke-linejoin: round; }
+    .usb { stroke: #ff2ec4; stroke-width: 3; fill: none; stroke-linejoin: round; }
+  </style>
+  <rect width="760" height="400" rx="22" fill="#0b0b0d"/>
+
+  <!-- power jack -->
+  <rect class="box" x="30" y="70" width="190" height="130" rx="12"/>
+  <text x="46" y="96" class="h">Power in</text>
+  <text x="46" y="118" class="s">USB-C receptacle (PC or</text>
+  <text x="46" y="134" class="s">USB charger)</text>
+  <text x="46" y="158" class="s">CC1, CC2: 5.1 kΩ to GND</text>
+  <text x="46" y="180" class="s">D+ / D− not connected</text>
+
+  <!-- +5 V and GND -->
+  <path class="pwr" d="M220 110 H300 M332 110 H520"/>
+  <rect x="300" y="100" width="32" height="20" rx="3" fill="#0b0b0d" stroke="#ff453a" stroke-width="2"/>
+  <text x="316" y="92" class="s" text-anchor="middle">polyfuse ~1 A</text>
+  <text x="470" y="100" class="l" text-anchor="middle" style="fill:#ff8a80; font-weight:600">+5 V</text>
+  <path class="gnd" d="M220 170 H520"/>
+  <text x="470" y="160" class="l" text-anchor="middle">GND</text>
+  <line x1="392" y1="110" x2="392" y2="128" stroke="#ff453a" stroke-width="2"/>
+  <line x1="380" y1="128" x2="404" y2="128" stroke="#ff453a" stroke-width="2"/>
+  <line x1="380" y1="136" x2="404" y2="136" stroke="#8e8e93" stroke-width="2"/>
+  <line x1="392" y1="136" x2="392" y2="170" stroke="#8e8e93" stroke-width="2"/>
+  <text x="372" y="137" class="s" text-anchor="end">100–220 µF</text>
+
+  <!-- board -->
+  <rect class="box" x="520" y="50" width="200" height="250" rx="14" style="stroke:#ff2ec4; stroke-opacity:.5"/>
+  <text x="620" y="80" class="h" text-anchor="middle">T-Display-S3</text>
+  <text x="620" y="100" class="h" text-anchor="middle">AMOLED Plus</text>
+  <text x="532" y="114" class="l" dy="12">VBUS pin (left header)</text>
+  <text x="532" y="174" class="l" dy="12">GND pin</text>
+  <rect x="585" y="290" width="70" height="22" rx="7" fill="#2c2c30" stroke="#48484a"/>
+  <text x="620" y="270" class="l" text-anchor="middle">USB-C port</text>
+
+  <!-- keyboard -->
+  <path class="usb" d="M620 312 V350 H480"/>
+  <rect class="box" x="130" y="318" width="350" height="64" rx="12"/>
+  <text x="146" y="344" class="h">Keyboard</text>
+  <text x="146" y="366" class="s">its USB cable, straight into the board's USB-C port</text>
+  <text x="496" y="370" class="s">or a panel jack + plug breakout:</text>
+  <text x="496" y="386" class="s">D+, D−, VBUS, GND; CC 56 kΩ to VBUS</text>
+
+  <text x="30" y="250" class="s">Never plug the board's own USB-C into a computer</text>
+  <text x="30" y="268" class="s">while +5 V is on the VBUS pin: they are the same net.</text>
+</svg>

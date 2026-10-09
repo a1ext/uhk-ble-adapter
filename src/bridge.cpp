@@ -1,7 +1,6 @@
 #include "bridge.h"
 #include <Arduino.h>
 #include <Preferences.h>
-#include <driver/gpio.h>
 #include <freertos/semphr.h>
 #include <vector>
 #include "ble_hid.h"
@@ -59,7 +58,7 @@ static bool    forgetOnStart = false; // cached map from older firmware: hosts m
 enum AgentAccess : uint8_t {
     AGENT_ALWAYS,    // read-only status, Agent polls it
     AGENT_UNLOCKED,  // only after "Allow" on the adapter's screen
-    AGENT_NEVER,     // firmware updates go by cable
+    AGENT_NEVER,     // keyboard firmware updates: keyboard on the PC by cable
 };
 
 static AgentAccess agentAccess(const uint8_t *cmd, uint16_t len)
@@ -97,7 +96,6 @@ static bool isAgentChannel(const HidDescInfo &info)
 }
 
 // ---------------- Runtime state ----------------
-static volatile bool btMode = false;
 static volatile bool usbReady = false;
 static int8_t usbToMap[MAX_IFACES];
 static int8_t mapToUsb[MAX_IFACES];
@@ -115,7 +113,7 @@ static volatile uint32_t agentUnlockUntilMs = 0;
 static volatile bool     agentAsking = false;    // refused while locked: prompt on the screen
 static volatile uint32_t agentAskedAtMs = 0;
 static const char *NOTE_NOT_KEYBOARD = "USB device is not a keyboard (bootloader?)";
-static const char *NOTE_FW_REFUSED   = "firmware update over BLE refused: use cable mode";
+static const char *NOTE_FW_REFUSED   = "keyboard firmware update refused: plug the UHK into the PC";
 
 // Output / feature reports written by the BLE host, re-sent to the keyboard
 // after it (re)enumerates: e.g. Caps Lock LED, scroll resolution multiplier
@@ -552,7 +550,7 @@ static uint32_t onDeviceReady(const UsbHidDevice &dev)
 
 static void onInputReport(uint8_t ifaceIdx, const uint8_t *data, uint16_t len)
 {
-    if (!usbReady || !btMode || ifaceIdx >= MAX_IFACES || usbToMap[ifaceIdx] < 0)
+    if (!usbReady || ifaceIdx >= MAX_IFACES || usbToMap[ifaceIdx] < 0)
         return;
     const IfaceMap &m = ifmaps[usbToMap[ifaceIdx]];
     if (!m.forward || !ble_hid_ready())
@@ -612,7 +610,7 @@ void bridge_begin()
         }
     }
     logf("MAP: %s", mapValid ? "using the cached keyboard layout"
-                             : "none yet - switch to BT mode with the keyboard attached");
+                             : "none yet - attach the keyboard");
 
     xTaskCreatePinnedToCore(senderTaskFn, "ble_tx", 4096, nullptr, 4, &senderTask, 1);
 }
@@ -630,24 +628,15 @@ static void startBle()
             ble_hid_forget_pairings();
         }
     }
-    ble_hid_set_enabled(btMode);
+    ble_hid_set_enabled(true);
 }
 
-void bridge_set_bt_mode(bool on)
+void bridge_start()
 {
-    btMode = on;
-    if (on) {
-        if (mapValid)
-            startBle();
-        if (!usb_hid_host_started()) {
-            UsbHidHostCallbacks cb = {onDeviceReady, onInputReport, onDeviceGone, canAcceptReport};
-            usb_hid_host_begin(cb);
-        }
-    } else {
-        if (ble_hid_started())
-            ble_hid_set_enabled(false);
-        qClear();
-    }
+    if (mapValid)
+        startBle();
+    UsbHidHostCallbacks cb = {onDeviceReady, onInputReport, onDeviceGone, canAcceptReport};
+    usb_hid_host_begin(cb);
 }
 
 void bridge_loop()
@@ -661,7 +650,7 @@ void bridge_loop()
     static uint32_t loggedFw = 0, loggedLocked = 0;
     if (agentFwRefused != loggedFw) {
         loggedFw = agentFwRefused;
-        logf("Agent: firmware update command refused over BLE - switch to cable mode");
+        logf("Agent: firmware update command refused over BLE - plug the keyboard into the PC");
     }
     if (agentLockedRefused != loggedLocked) {
         loggedLocked = agentLockedRefused;
@@ -678,9 +667,6 @@ void bridge_loop()
         if (ble_hid_started())
             ble_hid_forget_pairings();
         delay(200);
-        // Keep the mux on the ESP side through the software reset, so the
-        // keyboard does not briefly reconnect to the PC
-        gpio_hold_en(PIN_MUX_SEL);
         esp_restart();
     }
 }

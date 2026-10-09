@@ -34,7 +34,7 @@ struct OtaStatus {
 
 void ota_init();                       // before BLE: rollback bookkeeping, task
 void ota_create_service(BLEServer *server);
-// From the Arduino loop. hostConnected: a BLE host is connected and encrypted;
-// keepMuxOnEsp: BT mode, hold the mux select through the post-update reboot
-void ota_loop(bool hostConnected, bool keepMuxOnEsp);
+// From the Arduino loop. hostConnected: the active slot's host is connected
+// and authenticated (confirms a freshly updated image)
+void ota_loop(bool hostConnected);
 void ota_get_status(OtaStatus &st);

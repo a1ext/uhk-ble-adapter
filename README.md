@@ -5,7 +5,7 @@ LilyGo T-Display-S3 AMOLED Plus. Hardware and firmware details are in
 [CLAUDE.md](CLAUDE.md).
 
 <p align="center">
-  <img src="docs/img/screen-bt.png" width="564" alt="Adapter screen in Bluetooth mode: Cable / Bluetooth switch, keyboard and connection status, and the slot selector with slot 3 active">
+  <img src="docs/img/screen-bt.png" width="564" alt="Adapter screen: the active slot's name, keyboard and connection status, and the slot selector with slot 3 active">
 </p>
 
 ## What it does
@@ -20,10 +20,9 @@ LilyGo T-Display-S3 AMOLED Plus. Hardware and firmware details are in
   and macros without a cable. As far as we can tell from Agent's sources, it
   configures even the Bluetooth-capable UHK 80 only over USB. Keyboard
   firmware updates still need the cable.
-- **Cable or Bluetooth, one tap.** In Cable mode an analog USB switch connects
-  the keyboard straight to the computer, and the adapter is out of the data
-  path. In Bluetooth mode the board is the keyboard's USB host and acts as a
-  Bluetooth keyboard and mouse for the computer.
+- **Simple hardware.** The board, a 5 V supply on its VBUS pin and the
+  keyboard in its USB-C port: the board is the keyboard's USB host and a
+  Bluetooth keyboard and mouse for the computer. See [Build](#build).
 - **Everything the keyboard sends, unchanged.** The Bluetooth HID layout is
   built from the keyboard's own USB descriptors: NKRO, mouse keys with smooth
   scrolling, media and system keys. Keystrokes are never merged, so fast
@@ -47,6 +46,41 @@ LilyGo T-Display-S3 AMOLED Plus. Hardware and firmware details are in
   </tr>
 </table>
 
+## Build
+
+The adapter is the board and a 5 V supply: **+5 V on the board's VBUS pin**,
+and the keyboard plugged into its USB-C port. That port's VBUS is the same net
+as the VBUS pin, so the keyboard gets its power from there. Step-by-step
+instructions and a parts list are on the
+[project page](https://a1ext.github.io/uhk-ble-adapter/#build).
+
+<p align="center">
+  <img src="docs/img/pinout.svg" width="600" alt="Header pins of the T-Display-S3 AMOLED Plus, back view. Used: VBUS (+5 V in) and GND. The BOOT button is the pairing button.">
+</p>
+
+| Pin (back view, USB-C at the bottom) | Connect to |
+|---|---|
+| **VBUS** (left header, either of the two) | +5 V, through a ~1 A polyfuse |
+| **GND** | ground of the 5 V supply |
+| **USB-C port** | the keyboard: its cable directly, or a panel jack through a USB-C plug breakout |
+| **BOOT** button | nothing to wire: the pairing button (hold 1.5 s); held at power-up it starts the bootloader |
+
+<p align="center">
+  <img src="docs/img/wiring.svg" width="600" alt="Wiring: a USB-C power jack with 5.1 kilo-ohm resistors on CC1 and CC2 feeds +5 V through a polyfuse into the board's VBUS pin, with a 100-220 microfarad capacitor across +5 V and GND; the keyboard plugs into the board's USB-C port.">
+</p>
+
+- On a USB-C power jack, connect a 5.1 kΩ resistor from CC1 to GND and another
+  from CC2 to GND, so chargers and USB-C to USB-C cables supply 5 V. Put
+  100–220 µF across +5 V and GND close to the board.
+- A panel USB-C jack for the keyboard: D+, D−, VBUS and GND straight to a USB-C
+  plug breakout in the board's port, a 56 kΩ resistor from CC1 to VBUS and
+  another from CC2 to VBUS, and A6 joined with B6 (D+), A7 with B7 (D−).
+- **Never plug the board's USB-C into a computer while +5 V is on the VBUS
+  pin:** that connects two 5 V supplies to each other. Disconnect the supply
+  and the keyboard before flashing by cable.
+- The UHK asks for up to 500 mA, and the board adds 100–250 mA: use a USB 3
+  port (900 mA) or a charger.
+
 ## Flashing
 
 The adapter's screen shows which firmware is running: the line above the log
@@ -65,7 +99,8 @@ You need:
   don't support.
 
 Steps:
-1. Plug the board's USB-C straight into the computer, without a hub if you can.
+1. Disconnect the 5 V supply and the keyboard, then plug the board's USB-C
+   straight into the computer, without a hub if you can.
 2. Open the page and click **Install firmware**.
 3. Pick the board's port. It's usually called "USB JTAG/serial debug unit"
    (a COM port on Windows, `/dev/cu.usbmodem…` on macOS).
@@ -76,24 +111,23 @@ Steps:
    bootloader.
 
 Then set it up:
-1. Switch to **Bluetooth** on the touch screen and plug the keyboard into the
-   adapter. The adapter reads the keyboard's layout once and remembers it.
+1. Wire the 5 V supply (see [Build](#build)) and plug the keyboard into the
+   board's USB-C port. The adapter reads the keyboard's layout once and
+   remembers it.
 2. Pick a slot on the stem on the right, then hold **BOOT** for 1.5 s, until
    the bar along the bottom edge fills.
 3. Within 20 s, add **UHK60 BLE n** on the computer or phone, and type the
    6-digit code that the adapter shows.
 
 If something goes wrong:
-- **No port in the list:** put the board into its bootloader. Hold **BOOT**,
-  press and release **Reset**, release **BOOT**, then click **Install
-  firmware** again. Press **Reset** after flashing.
+- **No port in the list:** the firmware is already running and uses the USB
+  port as the keyboard's USB host. Put the board into its bootloader: hold
+  **BOOT**, press and release **Reset**, release **BOOT**, then click
+  **Install firmware** again. Press **Reset** after flashing.
 - **"Failed to open serial port":** another program is using the port. Close
   serial monitors, PlatformIO and other installer tabs.
-- **The adapter is in Bluetooth mode:** its USB port then acts as the
-  keyboard's USB host, so the computer sees no serial port. Switch to
-  **Cable** on the screen and press **Reset**, or use the bootloader as above.
 - **The adapter is assembled** and its USB-C is wired to the keyboard: the
-  browser can't reach the board. Update it over Bluetooth (below) or over UART.
+  browser can't reach the board. Update it over Bluetooth (below).
 
 Reinstalling later works the same way. Untick **Erase device** to keep the
 paired hosts and the cached keyboard layout. For routine updates, use
@@ -114,11 +148,11 @@ Environments → github-pages**.
 
 ### Over Bluetooth (OTA, from Windows) — the usual way
 
-No cables, no mode switching: the new image is written to the second app slot
-while the adapter keeps running, so the keyboard keeps typing.
+No cables: the new image is written to the second app slot while the adapter
+keeps running, so the keyboard keeps typing.
 
 Requirements:
-- the adapter is in **Bluetooth** mode, paired with this PC and connected to it;
+- the adapter is paired with this PC and connected to it;
 - a Python with the WinRT Bluetooth bindings: `pip install bleak`. To use a
   different interpreter, point the `UHK_OTA_PYTHON` environment variable at it.
 
@@ -137,7 +171,7 @@ What happens:
 2. Sending ~1.4 MB takes about 35 s (~43 KB/s). The adapter's screen shows the
    progress: a bar along the bottom edge and a "Firmware update N%" line.
 3. The adapter verifies the image (SHA-256 and format) and reboots into the new
-   firmware. The keyboard does not hop over to the PC meanwhile.
+   firmware; the keyboard is back within a few seconds.
 4. The new firmware is confirmed once Windows has reconnected (the log shows
    `OTA: new firmware confirmed`) or after 5 minutes of uptime. If it crashes or
    resets before that, the bootloader brings the previous firmware back.
@@ -151,34 +185,26 @@ OTA requires its passkey-authenticated, encrypted connection.
 pio run -t upload
 ```
 
-- The board's USB-C must be plugged into the PC and the adapter must be in
-  **Cable** mode. In Bluetooth mode the board's USB port is the keyboard's USB
-  host and there is no COM port: switch to Cable and press Reset.
-- If the firmware does not start or the port does not show up, use the
-  bootloader: hold BOOT, press Reset, release BOOT.
+- Disconnect the 5 V supply and the keyboard, and plug the board's USB-C into
+  the PC.
+- The running firmware uses that port as the keyboard's USB host, so there is
+  no COM port: enter the bootloader first. Hold BOOT while you plug the cable
+  in (or hold BOOT, press Reset, release BOOT). A fresh board shows the port
+  right away.
 - The board restarts by itself after flashing.
-
-### Over UART (assembled adapter, the board's USB-C is taken by the keyboard)
-
-Connect a 3.3 V USB-UART adapter to CN1 (JST-SH 1.0, 4 pins: GND / 3V3 / TX / RX),
-enter the bootloader (BOOT + Reset) and run:
-
-```bash
-pio run -t upload --upload-port COMx
-```
 
 ### Troubleshooting
 
 - **"OTA service not found"** — the adapter runs firmware without OTA (flash it
   over USB the first time), or Windows cached an old service list: remove the
   adapter in the Windows Bluetooth settings and pair it again.
-- **"no paired device named 'UHK60 BLE*'"** — the adapter is not paired: in
-  Bluetooth mode hold BOOT for 1.5 s (bar along the bottom of the screen), then
+- **"no paired device named 'UHK60 BLE*'"** — the adapter is not paired: hold
+  BOOT for 1.5 s (bar along the bottom of the screen), then
   add the device in Windows within 20 s and type the 6-digit code the adapter
   shows.
 - **"OTA service not found (status 1)"** with "not connected" — Windows has no
-  link to the adapter right now: Bluetooth mode, the slot of this PC selected,
-  the keyboard typing on the PC.
+  link to the adapter right now: select the slot of this PC and check that the
+  keyboard types on it.
 - **After a firmware update all hosts must pair again** when the release notes
   say so (pairing format changes): remove "UHK60 BLE n" on the host, then pair
   it again as above.
@@ -191,4 +217,5 @@ pio run -t upload --upload-port COMx
   retry in Agent; access stays open for 10 minutes after the last change and
   closes when the host disconnects ("Agent open … - tap to lock" closes it now).
 - **The UHK keyboard's own firmware** cannot be updated over Bluetooth: the
-  adapter refuses those Agent commands. Update it in Cable mode.
+  adapter refuses those Agent commands. Plug the keyboard straight into the
+  PC to update it.

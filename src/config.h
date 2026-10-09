@@ -5,17 +5,12 @@
 #include <Arduino.h>
 
 // ---------------- Pins (LilyGo T-Display-S3 AMOLED Plus) ----------------
-// USB 2:1 mux select. LOW = cable mode (keyboard <-> PC), HIGH = BT mode
-// (keyboard <-> ESP32 USB host). An external 10k pull-down keeps the mux in
-// cable mode during reset, in the ROM bootloader and with dead firmware.
-static constexpr gpio_num_t PIN_MUX_SEL  = GPIO_NUM_16;
-// Pairing button: hold = pairing mode for the active slot, press while pairing = cancel
-static constexpr gpio_num_t PIN_BTN_BOOT = GPIO_NUM_0;  // on-board BOOT key (10k pull-up + 100nF)
-static constexpr gpio_num_t PIN_BTN_EXT  = GPIO_NUM_10; // optional panel button to GND
+// Pairing button = the board's BOOT key (10k pull-up + 100nF): hold = pairing
+// mode for the active slot, press while pairing = cancel
+static constexpr gpio_num_t PIN_BTN_BOOT = GPIO_NUM_0;
 
 // ---------------- Buttons / touch UI ----------------
 static constexpr uint32_t BTN_DEBOUNCE_MS      = 30;
-static constexpr uint32_t MODE_SWITCH_DELAY_MS = 250;   // let the switch animation finish first
 static constexpr uint32_t LONG_PRESS_MS        = 1500;  // pairing button hold time (also on screen)
 static constexpr uint32_t PAIRING_WINDOW_MS    = 20 * 1000UL; // discoverable after "pair"
 

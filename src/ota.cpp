@@ -3,7 +3,6 @@
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLE2902.h>
-#include <driver/gpio.h>
 #include <esp_ota_ops.h>
 #include <freertos/stream_buffer.h>
 #include <mbedtls/sha256.h>
@@ -229,7 +228,7 @@ void ota_create_service(BLEServer *server)
     svc->start();
 }
 
-void ota_loop(bool hostConnected, bool keepMuxOnEsp)
+void ota_loop(bool hostConnected)
 {
     static bool abortSent = false;
     if (active && !hostConnected && !abortSent) { // host gone mid-transfer
@@ -240,11 +239,8 @@ void ota_loop(bool hostConnected, bool keepMuxOnEsp)
     if (!active)
         abortSent = false;
 
-    if (restartPending && (int32_t)(millis() - restartAtMs) >= 0) {
-        if (keepMuxOnEsp) // the keyboard must not hop to the PC during the reboot
-            gpio_hold_en(PIN_MUX_SEL);
+    if (restartPending && (int32_t)(millis() - restartAtMs) >= 0)
         esp_restart();
-    }
 
     static uint32_t hostSinceMs = 0;
     if (!hostConnected)

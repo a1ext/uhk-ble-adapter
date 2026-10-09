@@ -1,18 +1,11 @@
 /**
  * UHK 60 v2 -> BLE adapter (LilyGo T-Display-S3 AMOLED Plus)
  *
- *   Cable mode: the USB 2:1 mux connects the keyboard straight to the PC,
- *               the ESP32 is not in the data path (UHK Agent works).
- *   BT mode:    the mux connects the keyboard to the ESP32 native USB; the
- *               ESP32 is its USB host and a BLE HID device to the PC.
- *
- * The mode is switched on the touch screen and kept in NVS; after a crash /
- * watchdog / brownout reset the adapter starts in cable mode. Holding BOOT (or
- * the panel button on GPIO10) starts BLE pairing on the active slot.
+ * The keyboard plugs into the board's native USB port: the ESP32 is its USB
+ * host and a BLE HID device to up to BLE_SLOTS computers / phones. Holding
+ * BOOT starts BLE pairing on the active slot.
  */
 #include <Arduino.h>
-#include <Preferences.h>
-#include <driver/gpio.h>
 #include <esp_system.h>
 #include <lvgl.h>
 #include "ble_hid.h"
@@ -23,11 +16,6 @@
 #include "ota.h"
 #include "ui.h"
 
-static Preferences prefs;
-static bool        btMode = false;      // applied mode
-static bool        wantBt = false;      // requested mode, shown on screen
-static bool        modePending = false;
-static uint32_t    modeApplyAtMs = 0;
 static const char *bootNote = nullptr;
 static uint32_t    lastActivityMs = 0;
 static uint8_t     screenLevel = DISPLAY_BRIGHTNESS; // where the brightness is heading
@@ -39,28 +27,6 @@ static void wakeScreen()
     display_set_brightness(DISPLAY_BRIGHTNESS);
 }
 
-static void setMode(bool bt, bool save)
-{
-    btMode = wantBt = bt;
-    // Switch the keyboard first, then start / stop the USB host and BLE
-    gpio_set_level(PIN_MUX_SEL, bt ? 1 : 0);
-    bridge_set_bt_mode(bt);
-    if (save)
-        prefs.putUChar("mode", bt ? 1 : 0);
-    logf("Mode: %s", bt ? "BLUETOOTH" : "CABLE");
-    wakeScreen();
-}
-
-// Applied a moment later, so the switch animation is not stalled by the
-// BLE / USB host start-up
-static void onModeRequest(bool bt)
-{
-    wantBt = bt;
-    modePending = true;
-    modeApplyAtMs = millis() + MODE_SWITCH_DELAY_MS;
-    wakeScreen();
-}
-
 static void onSlotRequest(uint8_t slot)
 {
     wakeScreen();
@@ -70,10 +36,6 @@ static void onSlotRequest(uint8_t slot)
 static void onPair()
 {
     wakeScreen();
-    if (!btMode) {
-        logf("Pairing: switch to Bluetooth mode first");
-        return;
-    }
     ble_hid_start_pairing();
 }
 
@@ -89,7 +51,7 @@ static void onAgentAllow(bool allow)
     bridge_agent_allow(allow);
 }
 
-// Physical pairing button(s): hold = pairing mode, press while pairing = cancel
+// Pairing button (BOOT): hold = pairing mode, press while pairing = cancel
 struct Button {
     gpio_num_t pin;
     bool     stable;      // debounced state, true = pressed
@@ -98,7 +60,7 @@ struct Button {
     uint32_t downMs;
     bool     held;        // the hold action fired for this press
 };
-static Button buttons[] = {{PIN_BTN_BOOT}, {PIN_BTN_EXT}};
+static Button buttons[] = {{PIN_BTN_BOOT}};
 
 static void pollButtons()
 {
@@ -132,13 +94,13 @@ static void pollButtons()
             holdProgress = max<uint16_t>(holdProgress, (now - b.downMs) * 1000 / LONG_PRESS_MS);
     }
 
-    // Shown only where holding leads somewhere: BT mode, not pairing yet
-    // (a press during pairing cancels it). A firmware update uses the same bar.
+    // Shown only where holding leads somewhere: not while pairing (a press
+    // then cancels it). A firmware update uses the same bar.
     BleHidStatus ble;
     ble_hid_get_status(ble);
     OtaStatus ota;
     ota_get_status(ota);
-    uint16_t bar = btMode && !ble.pairingLeftMs ? holdProgress : 0;
+    uint16_t bar = ble.started && !ble.pairingLeftMs ? holdProgress : 0;
     if (!bar && ota.active && ota.total)
         bar = max<uint16_t>(1, (uint64_t)ota.received * 1000 / ota.total);
     ui_set_hold_progress(bar);
@@ -153,7 +115,7 @@ static lv_indev_t *touchIndev()
 }
 
 // Any touch is activity. A touch on a dark (or fading out) screen only wakes
-// it: LVGL does not see it, so it cannot flip the switch blindly.
+// it: LVGL does not see it, so nothing on the screen is tapped blindly.
 static void pollTouch()
 {
     static bool swallowing = false;
@@ -205,32 +167,14 @@ static void updateScreenPower()
 void setup()
 {
     esp_reset_reason_t reason = esp_reset_reason();
-    prefs.begin("adapter", false);
-    bool savedBt = prefs.getUChar("mode", 0) != 0;
     bool crashed = reason == ESP_RST_PANIC || reason == ESP_RST_INT_WDT || reason == ESP_RST_TASK_WDT
                 || reason == ESP_RST_WDT || reason == ESP_RST_BROWNOUT;
-    bool startBt = savedBt && !crashed;
-    wantBt = startBt;
-
-    // Mux select before anything else. After a deliberate restart the pad is
-    // still held at its previous level (see bridge_loop); the hold is released
-    // only once the new level is driven, so a BT -> BT restart is glitch-free.
-    gpio_config_t io = {};
-    io.pin_bit_mask = 1ULL << PIN_MUX_SEL;
-    io.mode = GPIO_MODE_OUTPUT;
-    gpio_set_level(PIN_MUX_SEL, startBt);
-    gpio_config(&io);
-    gpio_set_level(PIN_MUX_SEL, startBt);
-    gpio_hold_dis(PIN_MUX_SEL);
 
     log_begin();
-    logf("UHK BLE adapter, fw %s %s, reset reason %d, saved mode %s", __DATE__, __TIME__, reason,
-         savedBt ? "BT" : "cable");
+    logf("UHK BLE adapter, fw %s %s, reset reason %d", __DATE__, __TIME__, reason);
     ota_init();
-    if (crashed && savedBt) {
-        bootNote = "recovered from a crash: cable mode";
-        logf("Crash / watchdog reset - starting in cable mode");
-    }
+    if (crashed)
+        bootNote = "restarted after a crash / watchdog / brownout";
 
     for (auto &b : buttons)
         pinMode(b.pin, INPUT_PULLUP);
@@ -238,12 +182,13 @@ void setup()
     if (!display_begin())
         logf("Display init failed");
     bridge_begin(); // loads the cached HID map and the BLE host slots
-    ui_begin({onModeRequest, onSlotRequest, onPair, onPairCancel, onAgentAllow});
+    ui_begin({onSlotRequest, onPair, onPairCancel, onAgentAllow});
     // Draw the first frame now: BLE / USB host start below can take a while
-    ui_update(wantBt, bootNote);
+    ui_update(bootNote);
     lv_refr_now(nullptr);
 
-    setMode(startBt, false);
+    bridge_start(); // USB host for the keyboard + BLE
+    wakeScreen();
 }
 
 void loop()
@@ -252,19 +197,14 @@ void loop()
 
     pollButtons();
     pollTouch();
-    if (modePending && (int32_t)(millis() - modeApplyAtMs) >= 0) {
-        modePending = false;
-        if (wantBt != btMode)
-            setMode(wantBt, true);
-    }
     bridge_loop();
-    ota_loop(ble_hid_ready(), btMode);
+    ota_loop(ble_hid_ready());
 
     uint32_t now = millis();
     if (now >= nextUiMs) {
         nextUiMs = now + 100;
         updateScreenPower();
-        ui_update(wantBt, bootNote);
+        ui_update(bootNote);
     }
     display_loop();
     lv_task_handler();

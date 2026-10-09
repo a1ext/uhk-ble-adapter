@@ -1,41 +1,38 @@
 # UHK 60 v2 → BLE adapter (DIY)
 
 ## Goal
-Homemade USB→Bluetooth adapter for an Ultimate Hacking Keyboard 60 v2, with a
-mode switch:
-- **Cable mode** — keyboard D+/D- routed directly to the PC (ESP not in path; UHK Agent works).
-- **BT mode** — ESP32-S3 acts as USB host for the UHK and as a BLE HID device to the PC.
-Power always comes from the input USB cable (PC or charger).
+Homemade USB→Bluetooth adapter for an Ultimate Hacking Keyboard 60 v2: the keyboard plugs
+into the board's USB-C, the ESP32-S3 is its USB host and a BLE HID device for up to 5
+hosts (UHK Agent works over BLE too). Power comes from a 5 V supply on the board's VBUS
+pin (USB port or charger).
+- 2026-10-09: the analog USB mux and the firmware's Cable mode were dropped. For cable use
+  the keyboard is plugged straight into the PC.
 
 ## Hardware decisions
 - MCU board: **LilyGO T-Display S3 AMOLED Plus** (ESP32-S3R8, single USB-C = native USB).
   Schematic: `../../Lilygo/LilyGo-AMOLED-Series/schematic/T-Display-S3-AMOLED-Plus.pdf`.
-  - Its USB-C is used as the **USB host port** via a short USB-C plug breakout ("pigtail"):
-    5V/GND in (powers the board) + D+/D- (host data). GPIO19/20 are not on the headers.
-  - USB-C VBUS and the header **VBUS pins are the same net** (only a TVS). Never have the
-    board's USB-C in a PC while 5V is fed into the header VBUS. CC1/CC2 have 5.1k Rd on board.
+  - Its USB-C is the **USB host port** for the keyboard: the keyboard's cable directly, or
+    a panel USB-C jack wired to a USB-C plug breakout ("pigtail"; D+/D-/VBUS/GND straight,
+    56k Rp from CC1/CC2 to VBUS). GPIO19/20 are not on the headers.
+  - USB-C VBUS and the header **VBUS pins are the same net** (only a TVS): +5 V fed into
+    the header VBUS powers the board AND the keyboard (the board itself does not source
+    VBUS, BQ25896 OTG is off). Never have the board's USB-C in a PC while 5V is fed into the
+    header VBUS. CC1/CC2 have 5.1k Rd on board.
   - PMU is BQ25896 (PSEL variant, does not touch D+/D-); the LilyGo lib disables charging/OTG.
-  - UART0 (GPIO43 TX / GPIO44 RX) is on **CN1, JST-SH 1.0 4-pin (GND/3V3/TX/RX)** and on
-    the header: console + flashing in the assembled adapter (BOOT + RST → ROM download over
-    UART or USB, whichever is connected).
-- Data-line switch: **analog USB 2.0 2:1 mux**, candidates **CH442E** or **FSUSB42MUX**
-  (MSOP-10, hand-solderable; TS3USB221 also fine but QFN).
-  - COM = UHK D+/D-; port 1 = PC cable (SEL=0); port 2 = ESP pigtail (SEL=1).
-  - VCC from board 3V3, EN tied active, 100 nF decoupling.
-  - **SEL pulled down (10k) → defaults to cable mode** on reset / dead firmware / ROM bootloader.
+  - UART0 (GPIO43 TX / GPIO44 RX, CN1) only carries the debug log; it is not part of the
+    adapter. Flashing = BOOT held at power-up / Reset → ROM download over USB, or BLE OTA.
 - GPIO assignment:
-  - **GPIO16 → mux SEL** (output, 10k to GND).
-  - Mode (cable / BT) is switched on the touch screen. The physical button — BOOT (GPIO0)
-    and an optional panel button on **GPIO10 → GND** (internal pull-up) — is the pairing
-    button: hold 1.5 s = pairing mode for the active slot, press while pairing = cancel.
-    (BOOT held during reset still enters the ROM bootloader.)
-  - Spare: GPIO39–42 (header).
+  - The pairing button is the board's **BOOT** (GPIO0), at the bottom of the case: hold
+    1.5 s = pairing mode for the active slot, press while pairing = cancel. (BOOT held
+    during power-up / reset still enters the ROM bootloader.) No extra buttons.
+  - Spare: GPIO10, GPIO16, GPIO39–42 (header).
   - Taken / avoid: 0, 3, 45, 46 strapping; 1 PMU IRQ; 2/3 I2C (touch, RTC, PMU); 4 battery
     divider; 5, 6, 7, 9, 17, 18, 38, 47, 48 display; 11–14 SD card (11 also touch, per user);
     15 RTC INT; 21 touch INT; 19/20 USB; 43/44 UART0.
-- Only VBUS, GND, D+, D- are needed (SuperSpeed lines unused). Simple USB 2.0 USB-C panel jacks;
-  the PC-side jack needs 5.1k Rd on CC1 and CC2 for C-to-C cables.
-- Power input: polyfuse ~1 A, 100–220 µF bulk cap near the keyboard connector.
+- Power input: USB 2.0 USB-C receptacle (5.1k Rd on CC1 and CC2 for C-to-C cables, D+/D-
+  unconnected) → polyfuse ~1 A → header VBUS; 100–220 µF bulk cap near the board.
+- Wiring / pinout pictures for users: `docs/img/pinout.svg`, `docs/img/wiring.svg` (shown on
+  the Pages site and in the README).
 
 ## Keyboard facts (USBTreeView + UHK firmware sources, right/src/hid/*_app.hpp)
 - VID:PID **0x37A8:0x0003** ("Ultimate Gadget Laboratories", "UHK 60 v2")
@@ -61,7 +58,8 @@ Power always comes from the input USB cable (PC or charger).
   deploys `docs/` + the merged image to Pages on push to master and on tags (manifest
   version = `git describe`), tags `v*` → GitHub release with `-full.bin` and `-ota.bin`.
   Pages must be enabled once: Settings → Pages → Source: GitHub Actions.
-- USB / UART: `pio run -t upload` (board in cable mode, or BOOT + RST).
+- USB: `pio run -t upload` — the running firmware owns the USB port (host), so enter
+  the ROM bootloader first (BOOT + RST); disconnect the 5 V supply and the keyboard.
 - **Bluetooth (Windows): `pio run -t ota`** → `tools/ble_ota.py` uploads `firmware.bin` to the
   paired adapter through Windows' own GATT connection (no advertising needed). Needs a
   Python with the WinRT projections (`pip install bleak`); `UHK_OTA_PYTHON` selects the
@@ -69,7 +67,7 @@ Power always comes from the input USB cable (PC or charger).
   authenticated host only, `ble_hid_ready()` checked on every write), the image goes
   straight into the inactive app partition (A/B, default_16MB.csv app0/app1) while the
   firmware keeps running; SHA-256 + esp_ota_end validation, then boot partition switch and
-  reboot (SEL held in BT mode). Rollback: `verifyRollbackLater()` returns true, the new
+  reboot. Rollback: `verifyRollbackLater()` returns true, the new
   image stays pending-verify until a BLE host has been connected 3 s (or 5 min uptime);
   a crash / reset before that → the bootloader boots the previous image.
 
@@ -84,7 +82,8 @@ Power always comes from the input USB cable (PC or charger).
   takes the PHY, and the log tail is shown on the screen.
 - `src/usb_hid_host.*` — IDF USB Host Library: claims all HID interfaces, reads report
   descriptors, polls IN endpoints, SET_REPORT (LEDs / feature) on behalf of the BLE host.
-  Installed lazily on the first switch to BT mode (until then USB flashing works).
+  Installed at boot (`bridge_start()` after the first UI frame): from then on the board's
+  USB port is a host, no USB CDC / JTAG — flashing by USB needs the ROM bootloader.
 - `src/hid_desc.*` — report descriptor parser / rewriter. The Report ID added to an
   interface without IDs goes right after its top-level `Collection (Application)`: Windows
   (hidbthle) fails the device with code 10 "Report ID declared outside a top-level
@@ -119,7 +118,7 @@ Power always comes from the input USB cable (PC or charger).
     lasts 10 min after the last such command and ends when the host disconnects; a "Agent
     open N min - tap to lock" button shows it. After "Allow", retry in Agent. Firmware
     commands (0x01 Reenumerate, 0x02/0x03 module bootloader / KBOOT, 0x20/0x21 module flash)
-    are always refused — firmware updates by cable only.
+    are always refused — keyboard firmware updates with the keyboard on the PC by cable.
   FIFO: keyboard reports never merged (macros), mouse reports with equal buttons merged by
   summing relative axes; USB polling paused when the FIFO is high (backpressure).
 - `src/ble_hid.*` — Bluedroid BLEHIDDevice, MTU 185 (NKRO needs ≥ 32), at most 2
@@ -164,24 +163,24 @@ Power always comes from the input USB cable (PC or charger).
     (an earlier bug) deleted the host's bond and rotated the slot address. The pairing
     window does not close under a connected host that is still pairing (Windows reads GATT
     first).
-- Mode in NVS; crash / WDT / brownout reset → cable mode. Before a deliberate restart in BT
-  mode SEL is latched with `gpio_hold_en` so the keyboard does not hop to the PC.
-- `src/ui.*` — iOS-style Cable / Bluetooth switch (tapping a mode label works too; the mode
-  is applied 250 ms later so the animation stays smooth); slot selector on the right: a
+- A crash / WDT / brownout reset only shows a note on the screen (there is no safe mode;
+  recovery = ROM bootloader, a bad OTA image rolls back by itself).
+- `src/ui.*` — title = the active slot's BLE name ("UHK60 BLE n"; blue when the host is
+  authenticated, neon while pairing, grey otherwise); slot selector on the right: a
   vertical stem with one triangular leaf per slot (tip on the stem, wide edge outward),
-  alternating left / right (custom
-  draw, `lv_draw_polygon`; grey = host paired, dark = free); the active one is a neon
-  pink→violet gradient with a layered glow; on a tap a spark runs along the stem, then the
-  new leaf pops out of it (ease-out-back); slot line +
+  alternating left / right (custom draw, `lv_draw_polygon`; grey = host paired, dark =
+  free); the active one is a neon pink→violet gradient with a layered glow; on a tap a
+  spark runs along the stem, then the new leaf pops out of it (ease-out-back); slot line +
   "Pair" button (hold 1.5 s = pairing mode, tap during pairing = cancel, countdown shown);
-  status lines, log tail. Strip and pairing controls are hidden in cable mode. Pop-up cards
-  on the top layer: pairing passkey, UHK Agent "allow config access?".
+  status lines, log tail. Pop-up cards on the top layer: pairing passkey, UHK Agent "allow
+  config access?". README / Pages screenshots (`docs/img/screen-*.png`) were rendered from
+  `src/ui.cpp` with LVGL on a PC (TDM-GCC, stubbed status functions, canned data).
 - Screen: full brightness from boot, dims to 20% after 1 min idle, off after 3 min (AMOLED
   burn-in); touch / keyboard or BLE state change / pop-up wakes it (instantly). Dimming and
   switching off fade over 2.5 s (`display_fade_to`): interpolated in perceived brightness
   (level^(1/2.2)) with a cubic ease-out, so the low end does not drop abruptly. A touch on
   a dark or fading-out screen only wakes it (LVGL input is suppressed until release), so
-  it cannot flip the switch blindly.
+  nothing is tapped blindly.
 
 ## Troubleshooting notes
 - Windows PC (ASUS ROG Z790 Maximus Dark Hero, Intel Wireless Bluetooth 8087:0036) did not
@@ -201,6 +200,5 @@ Power always comes from the input USB cable (PC or charger).
   test: macOS / iOS / Android, reconnects with private addresses (Mac /
   iPhone), and that a host of another slot is dropped. Not done from that review: OTA
   image signing, flash encryption / secure boot.
-- First real BLE OTA run (`pio run -t ota`).
-- Exact mux pinout (FSUSB42MUX is the part with stock at TME; check its datasheet).
-- Enclosure (3D-printed), two USB-C panel jacks (GCT USB4085-GF-A) + button.
+- Enclosure (3D-printed): USB-C power jack, keyboard panel jack (GCT USB4085-GF-A); BOOT
+  reachable at the bottom.

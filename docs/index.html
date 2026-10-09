@@ -73,6 +73,15 @@
       padding: 1px 6px;
     }
     a { color: var(--neon-hi); }
+    h3 { font-size: 16px; margin: 28px 0 10px; }
+    .dim { color: var(--dim); }
+    p.warn { margin: 16px 0; }
+    figure { margin: 16px 0; }
+    figure img { display: block; width: 100%; height: auto; border-radius: 18px; }
+    figcaption { color: var(--dim); font-size: 14px; margin-top: 8px; }
+    table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 15px; }
+    th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--track); }
+    th { color: var(--dim); font-weight: 600; }
     footer { margin-top: 40px; color: var(--dim); font-size: 14px; }
   </style>
 </head>
@@ -81,8 +90,8 @@
   <h1>UHK 60 v2 <span class="arrow">→</span> Bluetooth adapter</h1>
   <p class="lead">
     Flash the adapter firmware onto a <b>LilyGo T-Display-S3 AMOLED Plus</b> straight from the browser.
-    Cable mode passes the keyboard through to the PC; Bluetooth mode turns the board into the keyboard's
-    USB host and a BLE keyboard and mouse for up to five devices.
+    The board becomes the keyboard's USB host and a Bluetooth keyboard and mouse for up to five
+    computers, tablets or phones, and UHK Agent works over Bluetooth too.
   </p>
 
   <div class="card install">
@@ -100,22 +109,80 @@
 
   <h2>Install</h2>
   <ol>
-    <li>Plug the board's USB-C straight into the computer with a data cable.</li>
+    <li>Unplug the keyboard and the adapter's 5 V supply, then plug the board's USB-C straight into the
+      computer with a data cable.</li>
     <li>Click <b>Install firmware</b> and pick the board's port (usually “USB JTAG/serial debug unit”).</li>
-    <li>If no port shows up: hold <kbd>BOOT</kbd>, press <kbd>Reset</kbd>, release <kbd>BOOT</kbd>, then try again.</li>
+    <li>No port in the list? The firmware is already running and uses the USB port for the keyboard. Hold
+      <kbd>BOOT</kbd>, press <kbd>Reset</kbd>, release <kbd>BOOT</kbd>, then try again.</li>
     <li>When it finishes and the screen stays black, press <kbd>Reset</kbd> once.</li>
   </ol>
 
   <h2>First run</h2>
   <ul>
-    <li>Switch to <b>Bluetooth</b> on the touch screen and attach the keyboard: the adapter reads the
-      keyboard's layout once and remembers it.</li>
+    <li>Wire the 5 V supply (see below) and plug the keyboard into the board's USB-C port. The adapter
+      reads the keyboard's layout once and remembers it.</li>
     <li>Pick a slot on the stem on the right, hold <kbd>BOOT</kbd> until the bar along the bottom fills,
       then pair <b>UHK60 BLE 1…5</b> on the computer or phone within 20 s and type the 6-digit code
       the adapter shows.</li>
-    <li>In Bluetooth mode the board's USB port belongs to the keyboard: to reinstall from this page,
-      switch to Cable mode and press <kbd>Reset</kbd> first.</li>
   </ul>
+
+  <h2 id="build">Build the adapter</h2>
+  <p>
+    The adapter is just the board and a 5 V supply: <b>+5 V on the board's VBUS pin</b>, and the keyboard
+    plugged into its USB-C port. The USB-C port's VBUS is on the same net as the VBUS pin, so the
+    keyboard is powered from there too.
+  </p>
+
+  <h3>Parts</h3>
+  <ul>
+    <li>LilyGo <b>T-Display-S3 AMOLED Plus</b>.</li>
+    <li>A 5 V input: a USB 2.0 <b>USB-C receptacle</b> (for example GCT USB4085-GF-A) with two 5.1 kΩ
+      resistors, so any USB port or charger can power the adapter. Any other 5 V source works too.</li>
+    <li>A resettable fuse (polyfuse) of about 1 A and a 100–220 µF capacitor (10 V or more).</li>
+    <li>For an enclosure (optional): a panel USB-C receptacle for the keyboard, a <b>USB-C plug breakout</b>
+      that goes into the board's port, and two 56 kΩ resistors.</li>
+  </ul>
+
+  <h3>Header pins</h3>
+  <figure>
+    <img src="img/pinout.svg" alt="Header pins of the T-Display-S3 AMOLED Plus, back view. Used: VBUS (+5 V in) and GND. The BOOT button is the pairing button." width="760" height="620">
+    <figcaption>Back view, with the screen facing down and the USB-C port at the bottom. If you look from the screen side, the columns swap.</figcaption>
+  </figure>
+  <table>
+    <tr><th>Pin</th><th>Connect to</th></tr>
+    <tr><td><b>VBUS</b> (left, either of the two)</td><td>+5 V, after the fuse</td></tr>
+    <tr><td><b>GND</b></td><td>ground of the 5 V supply (and of the keyboard panel jack, if you use one)</td></tr>
+    <tr><td><b>USB-C port</b></td><td>the keyboard: its cable directly, or the plug breakout of a panel jack</td></tr>
+    <tr><td><b>BOOT</b> button</td><td>nothing to wire: it's the pairing button (hold 1.5 s), and held at power-up it starts the bootloader for flashing</td></tr>
+  </table>
+  <p class="dim">
+    Leave the other pins alone: GPIO1–3, 11–15 and 21 are used by the PMU, touch, RTC and SD card on the board.
+  </p>
+
+  <h3>Wiring</h3>
+  <figure>
+    <img src="img/wiring.svg" alt="Wiring diagram: a USB-C power jack with 5.1 kilo-ohm resistors on CC1 and CC2 feeds +5 V through a polyfuse into the board's VBUS pin, with a capacitor across +5 V and GND; the keyboard plugs into the board's USB-C port." width="760" height="400">
+  </figure>
+  <ol>
+    <li><b>Power.</b> Run the input's +5 V through the polyfuse to one of the board's <b>VBUS</b> pins, and its ground to
+      a <b>GND</b> pin. Put the 100–220 µF capacitor across +5 V and GND close to the board. On a USB-C input
+      jack, connect a 5.1 kΩ resistor from CC1 to GND and another from CC2 to GND, so chargers and USB-C to
+      USB-C cables supply 5 V. Its D+ / D− stay unconnected.</li>
+    <li><b>Keyboard.</b> Plug the keyboard's USB cable into the board's USB-C port. In an enclosure, wire a panel
+      USB-C jack to a USB-C plug breakout in the board's port: D+, D−, VBUS and GND straight through, a 56 kΩ
+      resistor from CC1 to VBUS and another from CC2 to VBUS, and join A6 with B6 (D+) and A7 with B7 (D−).
+      Keep the D+ / D− wires short and together.</li>
+  </ol>
+  <p class="warn">
+    The board's USB-C VBUS and its VBUS pins are the same net. Never plug the board's USB-C into a computer
+    while +5 V is on the VBUS pin: that connects two 5 V supplies to each other. To flash the board by cable,
+    disconnect the 5 V supply and the keyboard first (then hold <kbd>BOOT</kbd> while you plug it in), or update it
+    over Bluetooth.
+  </p>
+  <p class="dim">
+    The UHK asks for up to 500 mA, and the board adds 100–250 mA. Use a USB 3 port (900 mA) or a charger
+    rather than a USB 2.0 port.
+  </p>
 
   <h2>Updates</h2>
   <p>

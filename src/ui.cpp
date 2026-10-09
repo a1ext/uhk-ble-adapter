@@ -8,11 +8,10 @@
 #include "log.h"
 #include "ota.h"
 
-static const uint32_t COLOR_CABLE  = 0x30D158; // iOS green
 static const uint32_t COLOR_BT     = 0x0A84FF; // iOS blue
 static const uint32_t COLOR_TEXT   = 0xE0E0E0;
 static const uint32_t COLOR_DIM    = 0x707880;
-static const uint32_t COLOR_OFF    = 0x48484A; // inactive mode label
+static const uint32_t COLOR_IDLE   = 0x8E8E93; // title while no host is connected
 static const uint32_t COLOR_NOTE   = 0xFFA000;
 static const uint32_t COLOR_RED    = 0xFF453A;
 static const uint32_t COLOR_TRACK  = 0x1C1C1E;
@@ -32,7 +31,7 @@ static const uint32_t   SLOT_ANIM_MS  = 750;
 static const int        SPARK_END     = 380; // of 1000: spark phase, then the pop
 
 static UiCallbacks cbs;
-static lv_obj_t *modeSwitch, *cableLabel, *btLabel;
+static lv_obj_t *titleLabel;
 static lv_obj_t *usbLabel, *bleLabel, *slotRow, *slotLabel, *pairBtn, *pairLabel;
 static bool pairingShown = false;
 static lv_obj_t *statsLabel, *noteLabel, *logLabel;
@@ -81,64 +80,6 @@ static void setVisible(lv_obj_t *o, bool visible)
         else
             lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
     }
-}
-
-// ---------------- Mode switch ----------------
-static void switchEvent(lv_event_t *)
-{
-    if (cbs.onModeRequest)
-        cbs.onModeRequest(lv_obj_has_state(modeSwitch, LV_STATE_CHECKED));
-}
-
-// Tapping "Cable" / "Bluetooth" flips the switch to that side (animated)
-static void modeLabelEvent(lv_event_t *e)
-{
-    bool bt = lv_event_get_user_data(e) != nullptr;
-    if (bt == lv_obj_has_state(modeSwitch, LV_STATE_CHECKED))
-        return;
-    if (bt)
-        lv_obj_add_state(modeSwitch, LV_STATE_CHECKED);
-    else
-        lv_obj_clear_state(modeSwitch, LV_STATE_CHECKED);
-    lv_event_send(modeSwitch, LV_EVENT_VALUE_CHANGED, nullptr); // animates + switchEvent
-}
-
-static lv_obj_t *makeModeLabel(lv_obj_t *parent, const char *text, bool bt)
-{
-    lv_obj_t *l = makeLabel(parent, &lv_font_montserrat_22, COLOR_OFF);
-    lv_label_set_text(l, text);
-    lv_obj_add_flag(l, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_ext_click_area(l, 12);
-    lv_obj_add_event_cb(l, modeLabelEvent, LV_EVENT_CLICKED, bt ? (void *)1 : nullptr);
-    return l;
-}
-
-// iOS-style switch: green track = cable, blue = Bluetooth, white knob
-static lv_obj_t *makeModeSwitch(lv_obj_t *parent)
-{
-    lv_obj_t *sw = lv_switch_create(parent);
-    lv_obj_set_size(sw, 112, 60);
-    lv_obj_set_style_border_width(sw, 0, LV_PART_MAIN);
-    lv_obj_set_style_outline_width(sw, 0, LV_PART_MAIN | LV_STATE_FOCUS_KEY);
-    lv_obj_set_style_anim_time(sw, 200, LV_PART_MAIN);
-
-    lv_obj_set_style_radius(sw, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(sw, lv_color_hex(COLOR_CABLE), LV_PART_MAIN);
-
-    lv_obj_set_style_radius(sw, LV_RADIUS_CIRCLE, LV_PART_INDICATOR);
-    lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, LV_PART_INDICATOR | LV_STATE_CHECKED);
-    lv_obj_set_style_bg_color(sw, lv_color_hex(COLOR_BT), LV_PART_INDICATOR | LV_STATE_CHECKED);
-
-    lv_obj_set_style_radius(sw, LV_RADIUS_CIRCLE, LV_PART_KNOB);
-    lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, LV_PART_KNOB);
-    lv_obj_set_style_bg_color(sw, lv_color_white(), LV_PART_KNOB);
-    lv_obj_set_style_pad_all(sw, -4, LV_PART_KNOB); // knob inset from the track edge
-    lv_obj_set_style_shadow_width(sw, 12, LV_PART_KNOB);
-    lv_obj_set_style_shadow_opa(sw, LV_OPA_50, LV_PART_KNOB);
-
-    lv_obj_add_event_cb(sw, switchEvent, LV_EVENT_VALUE_CHANGED, nullptr);
-    return sw;
 }
 
 // ---------------- Slot stem ----------------
@@ -544,14 +485,9 @@ void ui_begin(const UiCallbacks &cb)
     lv_obj_set_flex_grow(left, 1);
     lv_obj_set_height(left, lv_pct(100));
 
-    // Cable [switch] Bluetooth
-    lv_obj_t *row = makeContainer(left, LV_FLEX_FLOW_ROW_WRAP);
-    lv_obj_set_width(row, lv_pct(100));
-    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(row, 14, 0);
-    cableLabel = makeModeLabel(row, LV_SYMBOL_USB " Cable", false);
-    modeSwitch = makeModeSwitch(row);
-    btLabel    = makeModeLabel(row, LV_SYMBOL_BLUETOOTH " Bluetooth", true);
+    // Title: the name hosts see for the active slot, coloured by its state
+    titleLabel = makeLabel(left, &lv_font_montserrat_28, COLOR_IDLE);
+    lv_obj_set_style_pad_bottom(titleLabel, 6, 0);
 
     usbLabel = makeLabel(left, &lv_font_montserrat_16, COLOR_TEXT);
     bleLabel = makeLabel(left, &lv_font_montserrat_16, COLOR_TEXT);
@@ -579,7 +515,7 @@ void ui_begin(const UiCallbacks &cb)
     makePasskeyCard();
 }
 
-void ui_update(bool btMode, const char *bootNote)
+void ui_update(const char *bootNote)
 {
     BridgeStatus bs;
     bridge_get_status(bs);
@@ -587,23 +523,15 @@ void ui_update(bool btMode, const char *bootNote)
     ble_hid_get_status(ble);
     char buf[96];
 
-    // Follow mode changes made elsewhere (boot); no animation
-    if (lv_obj_has_state(modeSwitch, LV_STATE_CHECKED) != btMode) {
-        if (btMode)
-            lv_obj_add_state(modeSwitch, LV_STATE_CHECKED);
-        else
-            lv_obj_clear_state(modeSwitch, LV_STATE_CHECKED);
-    }
-    static int shownMode = -1; // restyle only on change (every set invalidates)
-    if (btMode != shownMode) {
-        shownMode = btMode;
-        lv_obj_set_style_text_color(cableLabel, lv_color_hex(btMode ? COLOR_OFF : COLOR_CABLE), 0);
-        lv_obj_set_style_text_color(btLabel, lv_color_hex(btMode ? COLOR_BT : COLOR_OFF), 0);
+    snprintf(buf, sizeof(buf), LV_SYMBOL_BLUETOOTH " %s %u", BLE_DEVICE_NAME, ble.slot + 1);
+    setText(titleLabel, buf);
+    static uint32_t titleColor = 0; // restyle only on change (every set invalidates)
+    uint32_t color = ble.ready ? COLOR_BT : ble.pairingLeftMs ? COLOR_NEON : COLOR_IDLE;
+    if (color != titleColor) {
+        titleColor = color;
+        lv_obj_set_style_text_color(titleLabel, lv_color_hex(color), 0);
     }
 
-    // Slot strip and pairing only make sense in Bluetooth mode
-    setVisible(strip, btMode);
-    setVisible(slotRow, btMode);
     if (ble.slot != shownSlot) // changed elsewhere (boot): no animation
         showSlot(ble.slot, false);
     static int shownSlots = -1;
@@ -620,17 +548,13 @@ void ui_update(bool btMode, const char *bootNote)
         lv_obj_invalidate(strip);
     }
 
-    if (!btMode)
-        snprintf(buf, sizeof(buf), LV_SYMBOL_USB " keyboard -> PC by cable");
-    else if (bs.usbConnected)
+    if (bs.usbConnected)
         snprintf(buf, sizeof(buf), LV_SYMBOL_USB " %s", bs.usbProduct[0] ? bs.usbProduct : "keyboard");
     else
         snprintf(buf, sizeof(buf), LV_SYMBOL_USB " waiting for the keyboard");
     setText(usbLabel, buf);
 
-    if (!btMode) {
-        snprintf(buf, sizeof(buf), LV_SYMBOL_BLUETOOTH " off");
-    } else if (!ble.started) {
+    if (!ble.started) {
         snprintf(buf, sizeof(buf), LV_SYMBOL_BLUETOOTH " waiting for the keyboard layout");
     } else if (ble.connected) {
         int n = snprintf(buf, sizeof(buf), LV_SYMBOL_BLUETOOTH " %s, MTU %u",
@@ -674,13 +598,13 @@ void ui_update(bool btMode, const char *bootNote)
                  (unsigned)((bs.agentUnlockedLeftMs + 59999) / 60000));
         setText(agentLabel, buf);
     }
-    setVisible(passkeyCard, btMode && ble.passkeyShown);
+    setVisible(passkeyCard, ble.passkeyShown);
     if (ble.passkeyShown) {
         snprintf(buf, sizeof(buf), "%03lu %03lu", (unsigned long)(ble.passkey / 1000),
                  (unsigned long)(ble.passkey % 1000));
         setText(passkeyLabel, buf);
     }
-    setVisible(agentCard, btMode && bs.agentAsking && !ble.passkeyShown);
+    setVisible(agentCard, bs.agentAsking && !ble.passkeyShown);
 
     snprintf(buf, sizeof(buf), "fw %s %s | reports: %lu sent, %lu merged, %lu dropped", __DATE__,
              __TIME__, (unsigned long)bs.forwarded, (unsigned long)bs.merged, (unsigned long)bs.dropped);
