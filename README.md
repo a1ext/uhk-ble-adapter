@@ -4,6 +4,49 @@ A DIY USB→Bluetooth adapter for the Ultimate Hacking Keyboard 60 v2, built on 
 LilyGo T-Display-S3 AMOLED Plus. Hardware and firmware details are in
 [CLAUDE.md](CLAUDE.md).
 
+<p align="center">
+  <img src="docs/img/screen-bt.png" width="564" alt="Adapter screen in Bluetooth mode: Cable / Bluetooth switch, keyboard and connection status, and the slot selector with slot 3 active">
+</p>
+
+## What it does
+
+- **Up to 5 Bluetooth hosts.** Every slot is a Bluetooth device of its own
+  ("UHK60 BLE 1" … "UHK60 BLE 5") with its own address. Each computer, tablet
+  or phone pairs with its own slot and reconnects to it by itself. To move the
+  keyboard to another host, tap that host's leaf on the stem.
+- **UHK Agent over Bluetooth.** The adapter passes the keyboard's Agent
+  command channel through as a separate Bluetooth HID device that identifies
+  as a UHK 60 v2. Agent finds the keyboard and reads and writes its keymaps
+  and macros without a cable. As far as we can tell from Agent's sources, it
+  configures even the Bluetooth-capable UHK 80 only over USB. Keyboard
+  firmware updates still need the cable.
+- **Cable or Bluetooth, one tap.** In Cable mode an analog USB switch connects
+  the keyboard straight to the computer, and the adapter is out of the data
+  path. In Bluetooth mode the board is the keyboard's USB host and acts as a
+  Bluetooth keyboard and mouse for the computer.
+- **Everything the keyboard sends, unchanged.** The Bluetooth HID layout is
+  built from the keyboard's own USB descriptors: NKRO, mouse keys with smooth
+  scrolling, media and system keys. Keystrokes are never merged, so fast
+  macros arrive intact.
+- **Secure by default.** Pairing needs the 6-digit code shown on the
+  adapter's screen, and only the active slot's host gets keystrokes. Agent can
+  read status freely; reading or changing the configuration needs a tap on
+  **Allow** on the adapter.
+- **Wireless updates of the adapter.** New firmware goes over Bluetooth into
+  the second app slot while the keyboard keeps typing. If the new firmware
+  fails before a host reconnects, the adapter rolls back to the previous one.
+
+<table>
+  <tr>
+    <td><img src="docs/img/screen-passkey.png" width="400" alt="Pairing pop-up showing the 6-digit code 482 913"></td>
+    <td><img src="docs/img/screen-agent.png" width="400" alt="Pop-up: UHK Agent asks for config access, with Deny and Allow buttons"></td>
+  </tr>
+  <tr>
+    <td align="center">Pairing a new host: type the code on it</td>
+    <td align="center">UHK Agent asks before touching the config</td>
+  </tr>
+</table>
+
 ## Flashing
 
 The adapter's screen shows which firmware is running: the line above the log
