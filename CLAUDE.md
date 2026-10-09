@@ -165,12 +165,24 @@ pin (USB port or charger).
     first).
 - A crash / WDT / brownout reset only shows a note on the screen (there is no safe mode;
   recovery = ROM bootloader, a bad OTA image rolls back by itself).
+- `src/stats.*` — typing statistics: the bridge counts every keyboard USB input report
+  (also without a BLE host): `hid_parse()` marks key / button fields (bitmaps on the
+  keyboard / button pages, arrays on keyboard / consumer / generic desktop) and the X/Y
+  elements of relative fields; a key / click = a bit going 0 → 1 or an array code that was
+  not in the previous report (codes 1–3 = rollover / errors ignored); travel = √(dx²+dy²)
+  in counts, shown as metres at `MOUSE_CPI` (800). Totals in NVS ("stats": keys, clicks,
+  travel), written every `STATS_SAVE_MS` (1 h), when the screen goes dark and before OTA /
+  descriptor-change restarts — a crash loses at most an hour.
 - `src/ui.*` — title = the active slot's BLE name ("UHK60 BLE n"; blue when the host is
   authenticated, neon while pairing, grey otherwise); slot selector on the right: a
-  vertical stem with one triangular leaf per slot (tip on the stem, wide edge outward),
-  alternating left / right (custom draw, `lv_draw_polygon`; grey = host paired, dark =
-  free); the active one is a neon pink→violet gradient with a layered glow; on a tap a
-  spark runs along the stem, then the new leaf pops out of it (ease-out-back); slot line +
+  little PCB (custom draw on the strip object): black solder mask, a copper bus from a
+  via at the top, one pad per slot branching left / right with a 45° jog and an "S1..S5"
+  silkscreen label (gold pad = host paired, empty gold ring = free). The bus is lit neon
+  from the via to the active slot, whose pad glows (rect shadow); on a tap the lit end runs
+  down the bus with a spark (ease-in-out), the old pad fades, then the new one lights up
+  and pops a little (ease-out-back). Chosen from 4 rendered styles (keycaps, terminal,
+  PCB, hex) — the others are not in the code. Below the slot line: typing statistics
+  (keys | clicks | mouse distance); slot line +
   "Pair" button (hold 1.5 s = pairing mode, tap during pairing = cancel, countdown shown);
   status lines, log tail. Pop-up cards on the top layer: pairing passkey, UHK Agent "allow
   config access?". README / Pages screenshots (`docs/img/screen-*.png`) were rendered from

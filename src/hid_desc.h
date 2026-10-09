@@ -4,8 +4,9 @@
  * The BLE report map is built by concatenating the keyboard's USB report
  * descriptors (one per HID interface) with the report IDs renumbered so they
  * are unique across interfaces. The parser extracts what the bridge needs:
- * report IDs, report sizes, and the relative input fields (mouse X/Y/wheel)
- * that may be summed when several USB reports are merged into one BLE report.
+ * report IDs, report sizes, the relative input fields (mouse X/Y/wheel) that
+ * may be summed when several USB reports are merged into one BLE report, and
+ * the key / button fields the typing statistics count.
  */
 #pragma once
 #include <stdint.h>
@@ -19,6 +20,17 @@ struct HidRelField {        // relative input field (array of `count` elements)
     uint8_t  bitSize;
     uint8_t  count;
     int32_t  logMin, logMax;
+    uint8_t  xyMask;        // bit k: element k is the pointer's X or Y (not a wheel)
+};
+
+enum HidKeyKind : uint8_t { HID_KEYS, HID_BUTTONS };
+
+struct HidKeyField {        // keys or buttons in an input report
+    uint16_t bitOffset;
+    uint8_t  bitSize;       // 1 for a bitmap
+    uint8_t  count;
+    bool     array;         // usage codes (6KRO keys, consumer keys) instead of one bit each
+    HidKeyKind kind;        // keyboard / consumer / system keys, or mouse buttons
 };
 
 struct HidReportLayout {
@@ -26,6 +38,7 @@ struct HidReportLayout {
     uint8_t  id;            // report ID inside the interface, 0 = interface uses no IDs
     uint16_t bits;          // payload size in bits (report ID byte excluded)
     std::vector<HidRelField> rel;
+    std::vector<HidKeyField> keys;
     uint16_t bytes() const { return (bits + 7) / 8; }
 };
 

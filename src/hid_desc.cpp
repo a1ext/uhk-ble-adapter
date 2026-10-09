@@ -13,7 +13,11 @@ enum : uint8_t { TAG_USAGE_PAGE = 0x0, TAG_LOGICAL_MIN = 0x1, TAG_LOGICAL_MAX = 
                  TAG_REPORT_SIZE = 0x7, TAG_REPORT_ID = 0x8, TAG_REPORT_COUNT = 0x9,
                  TAG_PUSH = 0xA, TAG_POP = 0xB };
 // Local item tags
-enum : uint8_t { TAG_USAGE = 0x0 };
+enum : uint8_t { TAG_USAGE = 0x0, TAG_USAGE_MIN = 0x1, TAG_USAGE_MAX = 0x2 };
+
+// Usage pages / usages the statistics look for
+enum : uint32_t { PAGE_DESKTOP = 0x01, PAGE_KEYBOARD = 0x07, PAGE_BUTTON = 0x09, PAGE_CONSUMER = 0x0C,
+                  USAGE_X = 0x00010030, USAGE_Y = 0x00010031 };
 
 struct Item {
     uint8_t  type, tag, size;
@@ -60,7 +64,7 @@ HidReportLayout &layoutFor(HidDescInfo &info, HidReportType type, uint8_t id)
     for (auto &r : info.reports)
         if (r.type == type && r.id == id)
             return r;
-    info.reports.push_back({type, id, 0, {}});
+    info.reports.push_back({type, id, 0, {}, {}});
     return info.reports.back();
 }
 
@@ -75,6 +79,17 @@ bool hid_parse(const uint8_t *d, size_t len, HidDescInfo &out)
     bool tlcSeen = false;
     uint32_t firstUsage = 0;
     uint8_t  firstUsageSize = 0;  // 0 = no usage since the last main item
+    // Local usages of the next main item, with their usage page
+    std::vector<uint32_t> usages;
+    uint32_t usageMin = 0, usageMax = 0;
+    bool haveMin = false, haveMax = false;
+    auto usageOf = [&](size_t k) -> uint32_t { // element k's usage (the last one repeats)
+        if (!usages.empty())
+            return usages[std::min(k, usages.size() - 1)];
+        if (haveMin && haveMax)
+            return std::min(usageMin + (uint32_t)k, usageMax);
+        return 0;
+    };
 
     for (size_t pos = 0; pos < len;) {
         Item it;
@@ -91,15 +106,25 @@ bool hid_parse(const uint8_t *d, size_t len, HidDescInfo &out)
                                 : it.tag == TAG_OUTPUT ? HID_OUTPUT : HID_FEATURE;
                 HidReportLayout &r = layoutFor(out, t, g.reportId);
                 bool constant = it.u & 0x01, variable = it.u & 0x02, relative = it.u & 0x04;
+                uint8_t count = std::min<uint32_t>(g.reportCount, 255);
                 if (t == HID_INPUT && !constant && variable && relative
                         && g.reportSize >= 1 && g.reportSize <= 32 && g.reportCount) {
                     // Logical Maximum is unsigned when the minimum is non-negative
                     // (e.g. 0xFF in one byte means 255, not -1)
                     int32_t lmax = (g.logMin >= 0 && g.logMaxS < g.logMin)
                                  ? (int32_t)g.logMaxU : g.logMaxS;
-                    r.rel.push_back({r.bits, (uint8_t)g.reportSize,
-                                     (uint8_t)std::min<uint32_t>(g.reportCount, 255),
-                                     g.logMin, lmax});
+                    uint8_t xy = 0;
+                    for (uint8_t k = 0; k < count && k < 8; k++)
+                        if (usageOf(k) == USAGE_X || usageOf(k) == USAGE_Y)
+                            xy |= 1 << k;
+                    r.rel.push_back({r.bits, (uint8_t)g.reportSize, count, g.logMin, lmax, xy});
+                } else if (t == HID_INPUT && !constant && g.reportSize >= 1 && g.reportSize <= 16 && count) {
+                    uint32_t u = usageOf(0);
+                    uint32_t page = u ? u >> 16 : g.usagePage;
+                    if (variable && g.reportSize == 1 && (page == PAGE_KEYBOARD || page == PAGE_BUTTON))
+                        r.keys.push_back({r.bits, 1, count, false, page == PAGE_BUTTON ? HID_BUTTONS : HID_KEYS});
+                    else if (!variable && (page == PAGE_KEYBOARD || page == PAGE_CONSUMER || page == PAGE_DESKTOP))
+                        r.keys.push_back({r.bits, (uint8_t)g.reportSize, count, true, HID_KEYS});
                 }
                 r.bits += g.reportSize * g.reportCount;
                 break;
@@ -118,6 +143,8 @@ bool hid_parse(const uint8_t *d, size_t len, HidDescInfo &out)
                 break;
             }
             firstUsageSize = 0; // local items only live until the next main item
+            usages.clear();
+            haveMin = haveMax = false;
         } else if (it.type == ITEM_GLOBAL) {
             switch (it.tag) {
             case TAG_USAGE_PAGE:   g.usagePage = it.u; break;
@@ -140,9 +167,21 @@ bool hid_parse(const uint8_t *d, size_t len, HidDescInfo &out)
                 break;
             }
         } else if (it.type == ITEM_LOCAL) {
-            if (it.tag == TAG_USAGE && !firstUsageSize) {
-                firstUsage = it.u;
-                firstUsageSize = it.size;
+            // a 4-byte usage carries its own usage page
+            uint32_t full = it.size == 4 ? it.u : ((uint32_t)g.usagePage << 16) | it.u;
+            if (it.tag == TAG_USAGE) {
+                if (!firstUsageSize) {
+                    firstUsage = it.u;
+                    firstUsageSize = it.size;
+                }
+                if (usages.size() < 64)
+                    usages.push_back(full);
+            } else if (it.tag == TAG_USAGE_MIN) {
+                usageMin = full;
+                haveMin = true;
+            } else if (it.tag == TAG_USAGE_MAX) {
+                usageMax = full;
+                haveMax = true;
             }
         }
     }

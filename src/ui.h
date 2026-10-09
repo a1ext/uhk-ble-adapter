@@ -1,14 +1,14 @@
 /**
- * Touch UI (LVGL 8): the active slot's name as the title, a host slot stem
- * (triangular leaves left / right, the active one neon), keyboard / BLE
- * status, counters and the log tail. Pop-ups:
+ * Touch UI (LVGL 8): the active slot's name as the title, the slot selector
+ * (a little PCB: gold pads left / right of a bus, the active one neon),
+ * keyboard / BLE status, typing statistics and the log tail. Pop-ups:
  * the pairing passkey and the UHK Agent "allow config access?" prompt.
  */
 #pragma once
 #include <stdint.h>
 
 struct UiCallbacks {
-    void (*onSlotRequest)(uint8_t slot); // user tapped a slot on the stem
+    void (*onSlotRequest)(uint8_t slot); // user tapped a slot
     void (*onPair)();                    // user held "Pair" (start pairing mode)
     void (*onPairCancel)();              // user tapped the button during pairing
     void (*onAgentAllow)(bool allow);    // UHK Agent config access: allow / deny or lock

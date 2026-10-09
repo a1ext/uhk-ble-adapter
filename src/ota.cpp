@@ -9,6 +9,7 @@
 #include "ble_hid.h"
 #include "config.h"
 #include "log.h"
+#include "stats.h"
 
 // Arduino core hook: do not auto-confirm a freshly updated image at boot,
 // ota_loop() confirms it once the firmware has proven itself
@@ -239,8 +240,10 @@ void ota_loop(bool hostConnected)
     if (!active)
         abortSent = false;
 
-    if (restartPending && (int32_t)(millis() - restartAtMs) >= 0)
+    if (restartPending && (int32_t)(millis() - restartAtMs) >= 0) {
+        stats_save();
         esp_restart();
+    }
 
     static uint32_t hostSinceMs = 0;
     if (!hostConnected)

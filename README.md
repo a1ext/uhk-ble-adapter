@@ -13,7 +13,8 @@ LilyGo T-Display-S3 AMOLED Plus. Hardware and firmware details are in
 - **Up to 5 Bluetooth hosts.** Every slot is a Bluetooth device of its own
   ("UHK60 BLE 1" … "UHK60 BLE 5") with its own address. Each computer, tablet
   or phone pairs with its own slot and reconnects to it by itself. To move the
-  keyboard to another host, tap that host's leaf on the stem.
+  keyboard to another host, tap its pad on the little circuit board on the
+  right of the screen.
 - **UHK Agent over Bluetooth.** The adapter passes the keyboard's Agent
   command channel through as a separate Bluetooth HID device that identifies
   as a UHK 60 v2. Agent finds the keyboard and reads and writes its keymaps
@@ -27,6 +28,9 @@ LilyGo T-Display-S3 AMOLED Plus. Hardware and firmware details are in
   built from the keyboard's own USB descriptors: NKRO, mouse keys with smooth
   scrolling, media and system keys. Keystrokes are never merged, so fast
   macros arrive intact.
+- **Typing statistics.** The screen counts your key presses, mouse clicks and
+  how far the mouse pointer travelled. The totals survive restarts: they are
+  saved hourly, when the screen goes dark and before updates.
 - **Secure by default.** Pairing needs the 6-digit code shown on the
   adapter's screen, and only the active slot's host gets keystrokes. Agent can
   read status freely; reading or changing the configuration needs a tap on
@@ -114,7 +118,7 @@ Then set it up:
 1. Wire the 5 V supply (see [Build](#build)) and plug the keyboard into the
    board's USB-C port. The adapter reads the keyboard's layout once and
    remembers it.
-2. Pick a slot on the stem on the right, then hold **BOOT** for 1.5 s, until
+2. Pick a slot (tap its pad on the right), then hold **BOOT** for 1.5 s, until
    the bar along the bottom edge fills.
 3. Within 20 s, add **UHK60 BLE n** on the computer or phone, and type the
    6-digit code that the adapter shows.

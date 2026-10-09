@@ -14,6 +14,7 @@
 #include "display.h"
 #include "log.h"
 #include "ota.h"
+#include "stats.h"
 #include "ui.h"
 
 static const char *bootNote = nullptr;
@@ -173,6 +174,7 @@ void setup()
     log_begin();
     logf("UHK BLE adapter, fw %s %s, reset reason %d", __DATE__, __TIME__, reason);
     ota_init();
+    stats_begin();
     if (crashed)
         bootNote = "restarted after a crash / watchdog / brownout";
 
@@ -199,6 +201,7 @@ void loop()
     pollTouch();
     bridge_loop();
     ota_loop(ble_hid_ready());
+    stats_loop(screenLevel == 0);
 
     uint32_t now = millis();
     if (now >= nextUiMs) {

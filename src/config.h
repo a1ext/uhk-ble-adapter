@@ -24,6 +24,13 @@ static constexpr uint32_t SCREEN_DIM_MS = 60 * 1000UL;
 static constexpr uint32_t SCREEN_OFF_MS = 3 * 60 * 1000UL;
 static constexpr uint32_t SCREEN_FADE_MS = 2500; // dim / off fade, slowing down towards the end
 
+// ---------------- Typing statistics ----------------
+// Totals live in NVS; written at most this often (and when the screen goes
+// dark, and before a restart): the adapter is always powered, flash wear stays low
+static constexpr uint32_t STATS_SAVE_MS = 60 * 60 * 1000UL;
+// Pointer travel is shown as the distance an 800 CPI mouse would have moved
+static constexpr float    MOUSE_CPI     = 800;
+
 // ---------------- BLE ----------------
 // Host slots: each slot is a separate BLE device ("UHK60 BLE 1".."5") with its
 // own static random address, so every computer / phone pairs with its own slot

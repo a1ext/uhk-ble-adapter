@@ -7,6 +7,7 @@
 #include "config.h"
 #include "hid_desc.h"
 #include "log.h"
+#include "stats.h"
 #include "usb_hid_host.h"
 
 static const char *NVS_NAMESPACE = "hidmap";
@@ -39,6 +40,7 @@ struct BleRef {               // indexed by BLE report ID
     uint8_t usbId = 0;        // report ID on USB, 0 = interface uses no IDs
     const HidReportLayout *in = nullptr; // input layout (merging)
     std::vector<uint8_t> absMask;        // input bits that must match to merge
+    std::vector<uint8_t> prev;           // last input report (statistics), empty = not counted
 };
 
 static Preferences nvs;
@@ -248,6 +250,11 @@ static bool buildMap(const DescSet &ds)
                 if ((int)i == agentIface && !agentInId)
                     agentInId = bid;
                 ref.in = &r;
+                bool counted = !r.keys.empty();
+                for (auto &f : r.rel)
+                    counted |= f.xyMask != 0;
+                if (counted)
+                    ref.prev.assign(r.bytes(), 0);
                 ref.absMask.assign(r.bytes(), 0xFF);
                 for (auto &f : r.rel)
                     for (unsigned k = 0; k < f.count; k++)
@@ -548,13 +555,54 @@ static uint32_t onDeviceReady(const UsbHidDevice &dev)
     return mask;
 }
 
+// Typing statistics: new key / button presses (bits going 0 -> 1, codes
+// that were not in the previous report) and pointer travel
+static void countReport(BleRef &ref, const uint8_t *data, uint16_t len)
+{
+    const HidReportLayout &r = *ref.in;
+    uint8_t now[MAX_REPORT] = {0};
+    memcpy(now, data, min<uint16_t>(len, r.bytes()));
+    const uint8_t *was = ref.prev.data();
+    unsigned bits = r.bytes() * 8;
+    uint32_t keys = 0, clicks = 0;
+    for (auto &f : r.keys) {
+        for (unsigned k = 0; k < f.count; k++) {
+            unsigned off = f.bitOffset + k * f.bitSize;
+            if (off + f.bitSize > bits)
+                break;
+            uint32_t v = getBits(now, off, f.bitSize);
+            if (!f.array) {
+                if (v && !getBits(was, off, 1))
+                    (f.kind == HID_BUTTONS ? clicks : keys)++;
+                continue;
+            }
+            if (v <= 3) // none / keyboard error codes (rollover)
+                continue;
+            bool held = false;
+            for (unsigned j = 0; j < f.count && !held; j++)
+                held = getBits(was, f.bitOffset + j * f.bitSize, f.bitSize) == v;
+            if (!held)
+                keys++;
+        }
+    }
+    int32_t xy[2] = {0, 0};
+    unsigned axes = 0;
+    for (auto &f : r.rel)
+        for (unsigned k = 0; k < f.count && k < 8 && axes < 2; k++)
+            if (f.xyMask & (1 << k) && f.bitOffset + (k + 1) * f.bitSize <= bits)
+                xy[axes++] = fieldValue(now, f.bitOffset + k * f.bitSize, f);
+    memcpy(ref.prev.data(), now, ref.prev.size());
+    if (keys || clicks || xy[0] || xy[1])
+        stats_add(keys, clicks, sqrtf((float)xy[0] * xy[0] + (float)xy[1] * xy[1]));
+}
+
 static void onInputReport(uint8_t ifaceIdx, const uint8_t *data, uint16_t len)
 {
     if (!usbReady || ifaceIdx >= MAX_IFACES || usbToMap[ifaceIdx] < 0)
         return;
     const IfaceMap &m = ifmaps[usbToMap[ifaceIdx]];
-    if (!m.forward || !ble_hid_ready())
-        return; // no host: drop, the next report carries the full state anyway
+    if (!m.forward)
+        return;
     uint8_t id;
     if (m.info.usesIds) {
         if (!len)
@@ -565,7 +613,11 @@ static void onInputReport(uint8_t ifaceIdx, const uint8_t *data, uint16_t len)
     } else {
         id = m.idMap[0];
     }
-    if (id && bleRefs[id].in)
+    if (!id || !bleRefs[id].in)
+        return;
+    if (!bleRefs[id].prev.empty())
+        countReport(bleRefs[id], data, len);
+    if (ble_hid_ready()) // no host: drop, the next report carries the full state anyway
         qPush(id, data, len);
 }
 
@@ -666,6 +718,7 @@ void bridge_loop()
     if (restartPending && millis() - restartAtMs > RESTART_DELAY_MS) {
         if (ble_hid_started())
             ble_hid_forget_pairings();
+        stats_save();
         delay(200);
         esp_restart();
     }
