@@ -11,16 +11,63 @@ starts with `fw <build date> <build time>`.
 
 ### Fresh board: web installer
 
-Open the project's GitHub Pages site (`https://<user>.github.io/<repo>/`) in
-Chrome, Edge or Opera on a desktop computer, plug the board's USB-C into the
-computer and click **Install firmware**. It flashes the latest build of
-`master` (merged image `uhk-ble-adapter.bin` at offset 0x0) and erases the
-board on the first install. Nothing to install locally.
+**<https://a1ext.github.io/uhk-ble-adapter/>** flashes the firmware straight
+from the browser. You don't need to install any tools.
 
-The site is built by CI (`.github/workflows/build.yml`) from `docs/` plus the
-firmware; enable it once in the repository settings: **Settings → Pages →
-Source: GitHub Actions**. Version tags (`v1.0`, …) additionally get a GitHub
-release with `*-full.bin` (flash at 0x0) and `*-ota.bin` (for the BLE uploader).
+You need:
+- a LilyGo T-Display-S3 AMOLED Plus and a USB-C cable that carries data (some
+  charging cables don't);
+- Chrome, Edge or Opera on a desktop computer (Windows, macOS, Linux). The page
+  talks to the board over Web Serial, which Firefox, Safari and mobile browsers
+  don't support.
+
+Steps:
+1. Plug the board's USB-C straight into the computer, without a hub if you can.
+2. Open the page and click **Install firmware**.
+3. Pick the board's port. It's usually called "USB JTAG/serial debug unit"
+   (a COM port on Windows, `/dev/cu.usbmodem…` on macOS).
+4. Tick **Erase device** on the first install and confirm. Flashing takes
+   about a minute.
+5. When the installer reports success, press **Reset** once if the screen
+   stays black. The installer's own reset can leave the chip in its
+   bootloader.
+
+Then set it up:
+1. Switch to **Bluetooth** on the touch screen and plug the keyboard into the
+   adapter. The adapter reads the keyboard's layout once and remembers it.
+2. Pick a slot on the stem on the right, then hold **BOOT** for 1.5 s, until
+   the bar along the bottom edge fills.
+3. Within 20 s, add **UHK60 BLE n** on the computer or phone, and type the
+   6-digit code that the adapter shows.
+
+If something goes wrong:
+- **No port in the list:** put the board into its bootloader. Hold **BOOT**,
+  press and release **Reset**, release **BOOT**, then click **Install
+  firmware** again. Press **Reset** after flashing.
+- **"Failed to open serial port":** another program is using the port. Close
+  serial monitors, PlatformIO and other installer tabs.
+- **The adapter is in Bluetooth mode:** its USB port then acts as the
+  keyboard's USB host, so the computer sees no serial port. Switch to
+  **Cable** on the screen and press **Reset**, or use the bootloader as above.
+- **The adapter is assembled** and its USB-C is wired to the keyboard: the
+  browser can't reach the board. Update it over Bluetooth (below) or over UART.
+
+Reinstalling later works the same way. Untick **Erase device** to keep the
+paired hosts and the cached keyboard layout. For routine updates, use
+Bluetooth (below).
+
+The page always installs the latest build of `master`; its version is shown
+next to the button. Fixed versions are on the
+[Releases page](https://github.com/a1ext/uhk-ble-adapter/releases):
+`*-full.bin` is the complete image, written at 0x0 with any esptool
+(`esptool.py --chip esp32s3 write_flash 0x0 uhk-ble-adapter-v1.0-full.bin`).
+`*-ota.bin` is the app image for the Bluetooth uploader.
+
+Maintainers: CI (`.github/workflows/build.yml`) builds the site from `docs/`
+plus the firmware on every push to `master` and deploys it to GitHub Pages
+(**Settings → Pages → Source: GitHub Actions**). Version tags (`v*`) also
+create a release. For tags to deploy too, allow `v*` under **Settings →
+Environments → github-pages**.
 
 ### Over Bluetooth (OTA, from Windows) — the usual way
 
