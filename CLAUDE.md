@@ -144,7 +144,7 @@ Power always comes from the input USB cable (PC or charger).
   - Bluedroid clears a bonded host's keys in RAM as soon as a pairing request arrives,
     before asking us (`smp_proc_pair_cmd`): a refused pairing attempt that spoofs a host's
     public address breaks that host until the adapter restarts (DoS only).
-  - 3 host slots, each a separate BLE identity: static random address (chip MAC + slot +
+  - 5 host slots (`BLE_SLOTS`), each a separate BLE identity: static random address (chip MAC + slot +
     generation) and name "UHK60 BLE n"; our identity key is not distributed, so hosts bind
     to the slot address. Slot = recorded host address (NVS "bleslots").
   - Advertising is built raw (flags, appearance keyboard, complete 16-bit UUID 0x1812, name
@@ -167,8 +167,12 @@ Power always comes from the input USB cable (PC or charger).
 - Mode in NVS; crash / WDT / brownout reset → cable mode. Before a deliberate restart in BT
   mode SEL is latched with `gpio_hold_en` so the keyboard does not hop to the PC.
 - `src/ui.*` — iOS-style Cable / Bluetooth switch (tapping a mode label works too; the mode
-  is applied 250 ms later so the animation stays smooth); vertical slot strip on the right
-  with a neon pink bubble that jumps to the tapped slot (bounce animation); slot line +
+  is applied 250 ms later so the animation stays smooth); slot selector on the right: a
+  vertical stem with one triangular leaf per slot (tip on the stem, wide edge outward),
+  alternating left / right (custom
+  draw, `lv_draw_polygon`; grey = host paired, dark = free); the active one is a neon
+  pink→violet gradient with a layered glow; on a tap a spark runs along the stem, then the
+  new leaf pops out of it (ease-out-back); slot line +
   "Pair" button (hold 1.5 s = pairing mode, tap during pairing = cancel, countdown shown);
   status lines, log tail. Strip and pairing controls are hidden in cable mode. Pop-up cards
   on the top layer: pairing passkey, UHK Agent "allow config access?".
@@ -192,8 +196,9 @@ Power always comes from the input USB cable (PC or charger).
   reads and writes the configuration over BLE.
 - Re-test after re-pairing: macOS (keys + Agent), iOS (keys; pointer needs AssistiveTouch),
   Android / Pixel (only one HID service is used there — main service is first).
-- Passkey pairing + identity check (security fixes after the adversarial review): test
-  pairing on Windows / macOS / iOS / Android, reconnects with private addresses (Mac /
+- Passkey pairing + identity check (security fixes after the adversarial review): Windows
+  shows the PIN prompt and pairs with the code from the screen (flashed by OTA). Still to
+  test: macOS / iOS / Android, reconnects with private addresses (Mac /
   iPhone), and that a host of another slot is dropped. Not done from that review: OTA
   image signing, flash encryption / secure boot.
 - First real BLE OTA run (`pio run -t ota`).

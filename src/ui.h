@@ -1,7 +1,8 @@
 /**
- * Touch UI (LVGL 8): iOS-style Cable / Bluetooth switch, a vertical host
- * slot strip with a neon bubble, keyboard / BLE status, counters and the log
- * tail. Slot and pairing controls are only shown in Bluetooth mode. Pop-ups:
+ * Touch UI (LVGL 8): iOS-style Cable / Bluetooth switch, a host slot stem
+ * (triangular pennants left / right, the active one neon), keyboard / BLE
+ * status, counters and the log tail. Slot and pairing controls are only shown
+ * in Bluetooth mode. Pop-ups:
  * the pairing passkey and the UHK Agent "allow config access?" prompt.
  */
 #pragma once
@@ -9,7 +10,7 @@
 
 struct UiCallbacks {
     void (*onModeRequest)(bool bt);      // user flipped the switch / tapped a mode label
-    void (*onSlotRequest)(uint8_t slot); // user tapped a slot on the strip
+    void (*onSlotRequest)(uint8_t slot); // user tapped a slot on the stem
     void (*onPair)();                    // user held "Pair" (start pairing mode)
     void (*onPairCancel)();              // user tapped the button during pairing
     void (*onAgentAllow)(bool allow);    // UHK Agent config access: allow / deny or lock

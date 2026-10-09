@@ -30,9 +30,9 @@ static constexpr uint32_t SCREEN_OFF_MS = 3 * 60 * 1000UL;
 static constexpr uint32_t SCREEN_FADE_MS = 2500; // dim / off fade, slowing down towards the end
 
 // ---------------- BLE ----------------
-// Host slots: each slot is a separate BLE device ("UHK60 BLE 1".."3") with its
+// Host slots: each slot is a separate BLE device ("UHK60 BLE 1".."5") with its
 // own static random address, so every computer / phone pairs with its own slot
-static constexpr uint8_t     BLE_SLOTS        = 3;
+static constexpr uint8_t     BLE_SLOTS        = 5;
 static constexpr const char *BLE_DEVICE_NAME  = "UHK60 BLE";
 static constexpr const char *BLE_MANUFACTURER = "DIY";
 // UHK Agent over BLE: the keyboard's vendor command interface (usage page
