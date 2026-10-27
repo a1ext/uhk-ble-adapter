@@ -33,6 +33,12 @@ static bool panelTaken()
     return anim_playing() || live_active();
 }
 
+// The screen shows nothing the user could act on: a press or touch only wakes it
+static bool screenAsleep()
+{
+    return screenLevel == 0 || display_brightness() == 0 || panelTaken();
+}
+
 static void wakeScreen()
 {
     if (live_active()) { // the user wants the normal screen; the spectrum returns after a pause
@@ -54,6 +60,7 @@ static void onSlotRequest(uint8_t slot)
 
 static void onPair()
 {
+    ui_close_menu();
     wakeScreen();
     ble_hid_start_pairing();
 }
@@ -70,7 +77,8 @@ static void onAgentAllow(bool allow)
     bridge_agent_allow(allow);
 }
 
-// Pairing button (BOOT): hold = pairing mode, press while pairing = cancel
+// Pairing button (BOOT): hold = pairing mode, press while pairing = cancel,
+// a short press otherwise opens / closes the settings menu
 struct Button {
     gpio_num_t pin;
     bool     stable;      // debounced state, true = pressed
@@ -78,6 +86,7 @@ struct Button {
     uint32_t rawChangedMs;
     uint32_t downMs;
     bool     held;        // the hold action fired for this press
+    bool     woke;        // this press woke the screen: no menu
 };
 static Button buttons[] = {{PIN_BTN_BOOT}};
 
@@ -96,12 +105,17 @@ static void pollButtons()
             if (raw) {
                 b.downMs = now;
                 b.held = false;
+                b.woke = screenAsleep();
                 wakeScreen();
             } else if (!b.held) {
                 BleHidStatus ble;
                 ble_hid_get_status(ble);
                 if (ble.pairingLeftMs)
                     onPairCancel();
+                else if (ui_menu_open())
+                    ui_close_menu();
+                else if (!b.woke)
+                    ui_open_menu();
             }
         }
         if (b.stable && !b.held && now - b.downMs >= LONG_PRESS_MS) {
@@ -142,7 +156,7 @@ static void pollTouch()
     int16_t x, y;
     bool touched = display_get_touch(&x, &y);
     if (touched) {
-        if ((screenLevel == 0 || display_brightness() == 0 || anim_playing() || live_active()) && !swallowing) {
+        if (screenAsleep() && !swallowing) {
             swallowing = true;
             if (lv_indev_t *in = touchIndev()) {
                 lv_indev_reset(in, nullptr);
@@ -194,6 +208,11 @@ static void updateScreenPower()
         return;
     }
     uint32_t idle = millis() - lastActivityMs;
+    if (ui_menu_open()) { // left open: closes when the screen dims
+        if (idle <= SCREEN_DIM_MS)
+            return;
+        ui_close_menu();
+    }
     const AnimSettings &as = anim_settings();
     if (anim_playing()) {
         // Burn-in protection still applies to a standby animation left running
@@ -282,7 +301,7 @@ void loop()
     ota_get_status(ota);
     if (live_take_fresh())
         liveSuppressUntil = millis(); // a new stream shows right away
-    if (!live_active() && live_streaming() && !ota.active
+    if (!live_active() && live_streaming() && !ota.active && !ui_menu_open()
         && (int32_t)(millis() - liveSuppressUntil) >= 0) {
         anim_stop();
         standbyDone = false;

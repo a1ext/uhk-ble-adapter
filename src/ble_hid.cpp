@@ -40,6 +40,7 @@ struct Slot {
 typedef std::array<uint8_t, 6> Addr;
 
 static Slot             slots[BLE_SLOTS];
+static char             hostNames[BLE_SLOTS][BLE_HOST_NAME_MAX + 1]; // set on the screen, "" = none
 static volatile uint8_t curSlot = 0;
 static Preferences      nvs;
 
@@ -85,6 +86,17 @@ static void saveSlot(uint8_t s)
     nvs.putBytes(key, &slots[s], sizeof(Slot));
 }
 
+static void setHostName(uint8_t s, const char *name)
+{
+    char key[8];
+    snprintf(key, sizeof(key), "n%u", s);
+    snprintf(hostNames[s], sizeof(hostNames[s]), "%s", name);
+    if (hostNames[s][0])
+        nvs.putString(key, hostNames[s]);
+    else if (nvs.isKey(key))
+        nvs.remove(key);
+}
+
 void ble_hid_init()
 {
     nvs.begin(NVS_NAMESPACE, false);
@@ -95,6 +107,10 @@ void ble_hid_init()
         memset(&slots[s], 0, sizeof(Slot));
         if (nvs.isKey(key) && nvs.getBytesLength(key) == sizeof(Slot))
             nvs.getBytes(key, &slots[s], sizeof(Slot));
+        snprintf(key, sizeof(key), "n%u", s);
+        hostNames[s][0] = 0;
+        if (nvs.isKey(key))
+            nvs.getString(key, hostNames[s], sizeof(hostNames[s]));
     }
 }
 
@@ -532,14 +548,19 @@ static void acceptPairing(const Addr &host)
     uint8_t s = curSlot;
     Slot &sl = slots[s];
     // Bluedroid keeps one bond per host: pairing it on this slot replaced
-    // the keys it had for another slot
+    // the keys it had for another slot (its name comes along)
+    char name[BLE_HOST_NAME_MAX + 1] = "";
     for (uint8_t o = 0; o < BLE_SLOTS; o++) {
         if (o != s && slots[o].used && sameAddr(slots[o].host, host.data())) {
             slots[o].used = false;
             saveSlot(o);
+            strcpy(name, hostNames[o]);
+            setHostName(o, "");
             logf("BLE: host moved from slot %u to slot %u", o + 1, s + 1);
         }
     }
+    if (!sl.used || !sameAddr(sl.host, host.data()))
+        setHostName(s, name); // the old host's name does not fit the new one
     if (sl.used) {
         // A new host replaced the old one: its bond goes, and the slot keeps
         // the trial address the new host paired on
@@ -739,6 +760,14 @@ void ble_hid_stop_pairing()
     restartOnSlot(); // back to the slot's own address, its host can reconnect
 }
 
+void ble_hid_set_host_name(uint8_t slot, const char *name)
+{
+    if (slot >= BLE_SLOTS || !slots[slot].used || !strcmp(hostNames[slot], name))
+        return;
+    setHostName(slot, name);
+    logf("BLE: slot %u host named \"%s\"", slot + 1, hostNames[slot]);
+}
+
 void ble_hid_forget_pairings()
 {
     int n = 0;
@@ -753,6 +782,7 @@ void ble_hid_forget_pairings()
         slots[s].used = false;
         slots[s].gen++;
         saveSlot(s);
+        setHostName(s, "");
     }
     logf("BLE: %d pairing(s) removed - also remove the old \"%s\" devices on the hosts", n,
          BLE_DEVICE_NAME);
@@ -771,6 +801,7 @@ void ble_hid_get_status(BleHidStatus &st)
     for (uint8_t s = 0; s < BLE_SLOTS; s++) {
         st.slotUsed[s] = slots[s].used;
         memcpy(st.slotHost[s], slots[s].host, 6);
+        memcpy(st.slotName[s], hostNames[s], sizeof(st.slotName[s]));
     }
     int32_t left = (int32_t)(pairingUntilMs - millis());
     st.pairingLeftMs = pairing && left > 0 ? left : 0;

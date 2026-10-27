@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <lvgl.h>
 #include <math.h>
+#include "anim.h"
 #include "ble_hid.h"
 #include "bridge.h"
 #include "config.h"
@@ -19,6 +20,7 @@ static const uint32_t COLOR_TRACK  = 0x1C1C1E;
 static const uint32_t COLOR_NEON   = 0xFF2EC4; // active slot
 static const uint32_t COLOR_NEON_HI = 0xFF9BE6;
 static const uint32_t COLOR_GREEN   = 0x39FF6A; // typing statistics
+static const uint32_t COLOR_AMBER   = 0xFFB52E; // the slot host's name in the title
 
 static const uint32_t COLOR_VIOLET  = 0xA23BFF; // active pad gradient
 
@@ -38,7 +40,7 @@ static const uint32_t   SLOT_ANIM_MS   = 750;
 static const int        SPARK_END      = 420; // of 1000: the spark runs, then the pad lights up
 
 static UiCallbacks cbs;
-static lv_obj_t *titleLabel;
+static lv_obj_t *titleLabel, *hostLabel;
 static lv_obj_t *usbLabel, *bleLabel, *slotRow, *slotLabel, *pairBtn, *pairLabel;
 static bool pairingShown = false;
 static lv_obj_t *countLabel, *statsLabel, *noteLabel, *logLabel;
@@ -292,8 +294,10 @@ static void showSlot(uint8_t slot, bool animate)
 static void slotEvent(lv_event_t *e)
 {
     uint8_t slot = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
-    if (slot == shownSlot)
+    if (slot == shownSlot) { // the active one: its settings
+        ui_open_menu();
         return;
+    }
     showSlot(slot, true);
     if (cbs.onSlotRequest)
         cbs.onSlotRequest(slot);
@@ -317,7 +321,7 @@ static void makeStrip(lv_obj_t *parent)
         lv_obj_set_style_border_width(cell, 0, 0);
         lv_obj_set_style_pad_all(cell, 0, 0);
         lv_obj_clear_flag(cell, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_add_event_cb(cell, slotEvent, LV_EVENT_CLICKED, (void *)(uintptr_t)s);
+        lv_obj_add_event_cb(cell, slotEvent, LV_EVENT_SHORT_CLICKED, (void *)(uintptr_t)s);
         slotCell[s] = cell;
     }
     lv_obj_refresh_ext_draw_size(strip);
@@ -496,6 +500,325 @@ static lv_obj_t *makeAgentButton(lv_obj_t *parent)
     return b;
 }
 
+// ---------------- Settings menu (top layer) ----------------
+// A short press of BOOT, or a tap on the active slot: the active slot's host
+// name (rename with the on-screen keyboard), the standby animation switch and
+// its day / night brightness. A tap beside the card closes it.
+static const uint8_t BRIGHT_MIN = 5;
+
+static lv_obj_t *menuShade, *menuTitle, *hostNameLabel, *hostAddrLabel, *renameBtn;
+static lv_obj_t *animSwitch, *animHint, *daySlider, *nightSlider, *dayValue, *nightValue;
+static lv_obj_t *renamePanel, *renameTitle, *renameText, *renameKbd;
+static uint8_t menuSlot;
+
+static void setPercent(lv_obj_t *label, int32_t v)
+{
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%d%%", (int)((v * 100 + 127) / 255));
+    setText(label, buf);
+}
+
+// The switch saves at once, a slider when it is let go
+static void animSettingEvent(lv_event_t *e)
+{
+    lv_obj_t *o = lv_event_get_target(e);
+    if (lv_event_get_code(e) == LV_EVENT_VALUE_CHANGED && o != animSwitch) {
+        setPercent(o == daySlider ? dayValue : nightValue, lv_slider_get_value(o));
+        return;
+    }
+    AnimSettings s = anim_settings();
+    s.mode = lv_obj_has_state(animSwitch, LV_STATE_CHECKED) ? ANIM_MODE_STANDBY : ANIM_MODE_OFF;
+    s.brightness = lv_slider_get_value(daySlider);
+    s.nightBrightness = lv_slider_get_value(nightSlider);
+    anim_set_settings(s);
+}
+
+static void showRename(bool on)
+{
+    setVisible(renamePanel, on);
+}
+
+static void renameEvent(lv_event_t *e)
+{
+    if (lv_event_get_target(e) == renameBtn) { // open the keyboard with the current name
+        BleHidStatus ble;
+        ble_hid_get_status(ble);
+        char buf[32];
+        snprintf(buf, sizeof(buf), LV_SYMBOL_EDIT " Slot %u host", menuSlot + 1);
+        lv_label_set_text(renameTitle, buf);
+        lv_textarea_set_text(renameText, ble.slotName[menuSlot]);
+        showRename(true);
+        return;
+    }
+    if (lv_event_get_code(e) == LV_EVENT_READY) { // the keyboard's OK key; trimmed, "" = no name
+        const char *t = lv_textarea_get_text(renameText);
+        while (*t == ' ')
+            t++;
+        char name[BLE_HOST_NAME_MAX + 1];
+        snprintf(name, sizeof(name), "%s", t);
+        for (int n = strlen(name); n && name[n - 1] == ' ';)
+            name[--n] = 0;
+        ble_hid_set_host_name(menuSlot, name);
+    }
+    showRename(false); // OK or the keyboard's close key
+}
+
+static void menuShadeEvent(lv_event_t *e)
+{
+    if (lv_event_get_target(e) == menuShade) // beside the card
+        ui_close_menu();
+}
+
+// Thin outlined pill, like the pairing button
+static lv_obj_t *makePillButton(lv_obj_t *parent, uint32_t color)
+{
+    lv_obj_t *b = lv_btn_create(parent);
+    lv_obj_set_style_bg_opa(b, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_bg_opa(b, LV_OPA_40, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(b, lv_color_hex(color), LV_STATE_PRESSED);
+    lv_obj_set_style_border_width(b, 1, 0);
+    lv_obj_set_style_border_color(b, lv_color_hex(color), 0);
+    lv_obj_set_style_shadow_width(b, 0, 0);
+    lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_pad_hor(b, 14, 0);
+    lv_obj_set_style_pad_ver(b, 7, 0);
+    lv_obj_set_ext_click_area(b, 8);
+    return b;
+}
+
+static lv_obj_t *makeMenuRow(lv_obj_t *parent)
+{
+    lv_obj_t *r = makeContainer(parent, LV_FLEX_FLOW_ROW);
+    lv_obj_set_width(r, lv_pct(100));
+    lv_obj_set_flex_align(r, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(r, 10, 0);
+    return r;
+}
+
+// Name above a dim hint, taking the row's free width
+static void makeMenuText(lv_obj_t *row, lv_obj_t **name, lv_obj_t **hint)
+{
+    lv_obj_t *col = makeContainer(row, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(col, 1, 0);
+    lv_obj_set_flex_grow(col, 1);
+    *name = makeLabel(col, &lv_font_montserrat_18, COLOR_TEXT);
+    *hint = makeLabel(col, &lv_font_montserrat_12, COLOR_DIM);
+}
+
+// Neon -> blue like the hold bar
+static void styleNeon(lv_obj_t *o, lv_style_selector_t sel)
+{
+    lv_obj_set_style_bg_color(o, lv_color_hex(COLOR_NEON), sel);
+    lv_obj_set_style_bg_grad_color(o, lv_color_hex(COLOR_BT), sel);
+    lv_obj_set_style_bg_grad_dir(o, LV_GRAD_DIR_HOR, sel);
+}
+
+static void styleKnob(lv_obj_t *o, lv_style_selector_t glow)
+{
+    lv_obj_set_style_bg_color(o, lv_color_white(), LV_PART_KNOB);
+    lv_obj_set_style_shadow_color(o, lv_color_hex(COLOR_NEON), glow);
+    lv_obj_set_style_shadow_width(o, 12, glow);
+    lv_obj_set_style_shadow_opa(o, LV_OPA_60, glow);
+}
+
+static lv_obj_t *makeSlider(lv_obj_t *row, const char *caption, lv_obj_t **value)
+{
+    lv_obj_t *l = makeLabel(row, &lv_font_montserrat_14, COLOR_DIM);
+    lv_label_set_text(l, caption);
+    lv_obj_t *s = lv_slider_create(row);
+    lv_obj_set_height(s, 6);
+    lv_obj_set_flex_grow(s, 1);
+    lv_slider_set_range(s, BRIGHT_MIN, 255);
+    lv_obj_set_ext_click_area(s, 14);
+    lv_obj_set_style_bg_color(s, lv_color_hex(0x2C2C30), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s, LV_OPA_COVER, LV_PART_MAIN);
+    styleNeon(s, LV_PART_INDICATOR);
+    styleKnob(s, LV_PART_KNOB);
+    lv_obj_set_style_pad_all(s, 5, LV_PART_KNOB);
+    lv_obj_add_event_cb(s, animSettingEvent, LV_EVENT_VALUE_CHANGED, nullptr);
+    lv_obj_add_event_cb(s, animSettingEvent, LV_EVENT_RELEASED, nullptr);
+    *value = makeLabel(row, &lv_font_montserrat_14, COLOR_TEXT);
+    lv_obj_set_width(*value, 40);
+    lv_obj_set_style_text_align(*value, LV_TEXT_ALIGN_RIGHT, 0);
+    return s;
+}
+
+static void makeMenu()
+{
+    // Dimmed backdrop over the whole screen: catches the taps beside the card
+    menuShade = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(menuShade, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_bg_color(menuShade, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(menuShade, LV_OPA_70, 0);
+    lv_obj_set_style_border_width(menuShade, 0, 0);
+    lv_obj_set_style_radius(menuShade, 0, 0);
+    lv_obj_clear_flag(menuShade, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(menuShade, menuShadeEvent, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_flag(menuShade, LV_OBJ_FLAG_HIDDEN);
+
+    lv_obj_t *c = makeCard();
+    lv_obj_set_parent(c, menuShade);
+    lv_obj_set_width(c, lv_disp_get_hor_res(nullptr) - 56);
+    lv_obj_center(c);
+    lv_obj_set_style_pad_hor(c, 18, 0);
+    lv_obj_set_style_pad_row(c, 10, 0);
+    lv_obj_set_flex_align(c, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_clear_flag(c, LV_OBJ_FLAG_HIDDEN);
+
+    lv_obj_t *r = makeMenuRow(c);
+    menuTitle = makeLabel(r, &lv_font_montserrat_16, COLOR_NEON_HI);
+    lv_obj_t *close = makePillButton(r, COLOR_DIM);
+    lv_obj_set_style_pad_hor(close, 10, 0);
+    lv_obj_set_style_pad_ver(close, 5, 0);
+    lv_obj_t *l = makeLabel(close, &lv_font_montserrat_14, COLOR_TEXT);
+    lv_label_set_text(l, LV_SYMBOL_CLOSE);
+    lv_obj_add_event_cb(close, [](lv_event_t *) { ui_close_menu(); }, LV_EVENT_CLICKED, nullptr);
+
+    r = makeMenuRow(c);
+    makeMenuText(r, &hostNameLabel, &hostAddrLabel);
+    renameBtn = makePillButton(r, COLOR_NEON);
+    l = makeLabel(renameBtn, &lv_font_montserrat_14, COLOR_NEON_HI);
+    lv_label_set_text(l, LV_SYMBOL_EDIT " Rename");
+    lv_obj_add_event_cb(renameBtn, renameEvent, LV_EVENT_CLICKED, nullptr);
+
+    r = makeMenuRow(c);
+    lv_obj_t *animName;
+    makeMenuText(r, &animName, &animHint);
+    lv_label_set_text(animName, "Standby animation");
+    animSwitch = lv_switch_create(r);
+    lv_obj_set_size(animSwitch, 50, 26);
+    lv_obj_set_style_bg_color(animSwitch, lv_color_hex(0x2C2C30), LV_PART_MAIN);
+    styleNeon(animSwitch, LV_PART_INDICATOR | LV_STATE_CHECKED);
+    styleKnob(animSwitch, LV_PART_KNOB | LV_STATE_CHECKED);
+    lv_obj_set_ext_click_area(animSwitch, 10);
+    lv_obj_add_event_cb(animSwitch, animSettingEvent, LV_EVENT_VALUE_CHANGED, nullptr);
+
+    l = makeLabel(c, &lv_font_montserrat_12, COLOR_DIM);
+    lv_label_set_text(l, "Brightness of the animation and the live spectrum");
+    lv_obj_set_style_pad_bottom(l, -4, 0);
+    r = makeMenuRow(c);
+    lv_obj_set_style_pad_column(r, 12, 0);
+    daySlider = makeSlider(r, "Day", &dayValue);
+    nightSlider = makeSlider(r, "Night", &nightValue);
+}
+
+// Full screen: the name above the keyboard (OK saves, the close key cancels)
+static void makeRenamePanel()
+{
+    renamePanel = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(renamePanel, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_bg_color(renamePanel, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(renamePanel, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(renamePanel, 0, 0);
+    lv_obj_set_style_radius(renamePanel, 0, 0);
+    lv_obj_set_style_pad_all(renamePanel, 6, 0);
+    lv_obj_set_style_pad_row(renamePanel, 6, 0);
+    lv_obj_set_flex_flow(renamePanel, LV_FLEX_FLOW_COLUMN);
+    lv_obj_clear_flag(renamePanel, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *r = makeMenuRow(renamePanel);
+    lv_obj_set_style_pad_left(r, 6, 0);
+    renameTitle = makeLabel(r, &lv_font_montserrat_16, COLOR_NEON_HI);
+    renameText = lv_textarea_create(r);
+    lv_obj_set_flex_grow(renameText, 1);
+    lv_textarea_set_one_line(renameText, true);
+    lv_textarea_set_max_length(renameText, BLE_HOST_NAME_MAX);
+    lv_textarea_set_placeholder_text(renameText, "e.g. MacBook");
+    lv_obj_set_style_text_font(renameText, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(renameText, lv_color_white(), 0);
+    lv_obj_set_style_text_color(renameText, lv_color_hex(COLOR_DIM), LV_PART_TEXTAREA_PLACEHOLDER);
+    lv_obj_set_style_bg_color(renameText, lv_color_hex(0x111114), 0);
+    lv_obj_set_style_border_width(renameText, 1, 0);
+    lv_obj_set_style_border_color(renameText, lv_color_hex(COLOR_NEON), 0);
+    lv_obj_set_style_border_color(renameText, lv_color_hex(COLOR_NEON), LV_STATE_FOCUSED);
+    lv_obj_set_style_radius(renameText, 10, 0);
+    lv_obj_set_style_pad_ver(renameText, 6, 0);
+    lv_obj_set_style_shadow_color(renameText, lv_color_hex(COLOR_NEON), 0);
+    lv_obj_set_style_shadow_width(renameText, 16, 0);
+    lv_obj_set_style_shadow_opa(renameText, LV_OPA_30, 0);
+    lv_obj_set_style_border_color(renameText, lv_color_hex(COLOR_NEON), LV_PART_CURSOR | LV_STATE_FOCUSED);
+    lv_obj_add_state(renameText, LV_STATE_FOCUSED); // the cursor shows and blinks
+
+    renameKbd = lv_keyboard_create(renamePanel);
+    lv_obj_set_width(renameKbd, lv_pct(100));
+    lv_obj_set_flex_grow(renameKbd, 1);
+    lv_keyboard_set_textarea(renameKbd, renameText);
+    lv_obj_set_style_bg_opa(renameKbd, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(renameKbd, 0, 0);
+    lv_obj_set_style_pad_all(renameKbd, 0, 0);
+    lv_obj_set_style_pad_gap(renameKbd, 5, 0);
+    lv_obj_set_style_text_font(renameKbd, &lv_font_montserrat_18, LV_PART_ITEMS);
+    lv_obj_set_style_text_color(renameKbd, lv_color_hex(COLOR_TEXT), LV_PART_ITEMS);
+    lv_obj_set_style_bg_color(renameKbd, lv_color_hex(0x1C1C1F), LV_PART_ITEMS);
+    lv_obj_set_style_bg_color(renameKbd, lv_color_hex(0x2E2E34), LV_PART_ITEMS | LV_STATE_CHECKED);
+    lv_obj_set_style_text_color(renameKbd, lv_color_hex(COLOR_NEON_HI), LV_PART_ITEMS | LV_STATE_CHECKED);
+    lv_obj_set_style_bg_color(renameKbd, lv_color_hex(COLOR_NEON), LV_PART_ITEMS | LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(renameKbd, lv_color_white(), LV_PART_ITEMS | LV_STATE_PRESSED);
+    lv_obj_set_style_radius(renameKbd, 8, LV_PART_ITEMS);
+    lv_obj_set_style_shadow_width(renameKbd, 0, LV_PART_ITEMS);
+    lv_obj_set_style_border_width(renameKbd, 0, LV_PART_ITEMS);
+    lv_obj_add_event_cb(renameKbd, renameEvent, LV_EVENT_READY, nullptr);
+    lv_obj_add_event_cb(renameKbd, renameEvent, LV_EVENT_CANCEL, nullptr);
+
+    lv_obj_add_flag(renamePanel, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void updateMenu(const BleHidStatus &ble)
+{
+    char buf[64];
+    snprintf(buf, sizeof(buf), LV_SYMBOL_SETTINGS "  Settings - %s %u", BLE_DEVICE_NAME, menuSlot + 1);
+    setText(menuTitle, buf);
+    bool used = ble.slotUsed[menuSlot];
+    const char *name = ble.slotName[menuSlot];
+    const uint8_t *h = ble.slotHost[menuSlot];
+    setText(hostNameLabel, !used ? "No host paired" : name[0] ? name : "Unnamed host");
+    static uint32_t nameColor = 0;
+    uint32_t color = used && name[0] ? 0xFFFFFF : COLOR_DIM;
+    if (color != nameColor) {
+        nameColor = color;
+        lv_obj_set_style_text_color(hostNameLabel, lv_color_hex(color), 0);
+    }
+    if (used)
+        snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X", h[0], h[1], h[2], h[3], h[4], h[5]);
+    else
+        snprintf(buf, sizeof(buf), "hold BOOT or Pair to pair one");
+    setText(hostAddrLabel, buf);
+    setVisible(renameBtn, used);
+    if (!used)
+        showRename(false); // the host went away meanwhile
+    setText(animHint, anim_available() ? "when idle, without the live spectrum" : "no animation uploaded yet");
+}
+
+void ui_open_menu()
+{
+    BleHidStatus ble;
+    ble_hid_get_status(ble);
+    menuSlot = ble.slot;
+    const AnimSettings &s = anim_settings();
+    if (s.mode == ANIM_MODE_STANDBY)
+        lv_obj_add_state(animSwitch, LV_STATE_CHECKED);
+    else
+        lv_obj_clear_state(animSwitch, LV_STATE_CHECKED);
+    lv_slider_set_value(daySlider, s.brightness, LV_ANIM_OFF);
+    lv_slider_set_value(nightSlider, s.nightBrightness, LV_ANIM_OFF);
+    setPercent(dayValue, lv_slider_get_value(daySlider));
+    setPercent(nightValue, lv_slider_get_value(nightSlider));
+    updateMenu(ble);
+    showRename(false);
+    setVisible(menuShade, true);
+}
+
+void ui_close_menu()
+{
+    showRename(false);
+    setVisible(menuShade, false);
+}
+
+bool ui_menu_open()
+{
+    return !lv_obj_has_flag(menuShade, LV_OBJ_FLAG_HIDDEN);
+}
+
 void ui_set_hold_progress(uint16_t permille)
 {
     static int shown = -1;
@@ -546,9 +869,16 @@ void ui_begin(const UiCallbacks &cb)
     lv_obj_set_flex_grow(left, 1);
     lv_obj_set_height(left, lv_pct(100));
 
-    // Title: the name hosts see for the active slot, coloured by its state
-    titleLabel = makeLabel(left, &lv_font_montserrat_28, COLOR_IDLE);
-    lv_obj_set_style_pad_bottom(titleLabel, 6, 0);
+    // Title: the name hosts see for the active slot, coloured by its state, then
+    // the name given to the slot's host
+    lv_obj_t *titleRow = makeContainer(left, LV_FLEX_FLOW_ROW);
+    lv_obj_set_width(titleRow, lv_pct(100));
+    lv_obj_set_style_pad_column(titleRow, 8, 0);
+    lv_obj_set_style_pad_bottom(titleRow, 6, 0);
+    titleLabel = makeLabel(titleRow, &lv_font_montserrat_24, COLOR_IDLE);
+    hostLabel = makeLabel(titleRow, &lv_font_montserrat_24, COLOR_AMBER);
+    lv_obj_set_flex_grow(hostLabel, 1);
+    lv_label_set_long_mode(hostLabel, LV_LABEL_LONG_DOT);
 
     usbLabel = makeLabel(left, &lv_font_montserrat_16, COLOR_TEXT);
     bleLabel = makeLabel(left, &lv_font_montserrat_16, COLOR_TEXT);
@@ -575,6 +905,8 @@ void ui_begin(const UiCallbacks &cb)
     makeStrip(scr);
     layoutStrip();
     makeHoldBar();
+    makeMenu();
+    makeRenamePanel();
     makeAgentCard();
     makePasskeyCard();
 }
@@ -595,6 +927,9 @@ void ui_update(const char *bootNote)
         titleColor = color;
         lv_obj_set_style_text_color(titleLabel, lv_color_hex(color), 0);
     }
+    const char *host = ble.slotUsed[ble.slot] ? ble.slotName[ble.slot] : "";
+    snprintf(buf, sizeof(buf), "- %s", host);
+    setText(hostLabel, host[0] ? buf : "");
 
     if (ble.slot != shownSlot) // changed elsewhere (boot): no animation
         showSlot(ble.slot, false);
@@ -625,7 +960,8 @@ void ui_update(const char *bootNote)
         snprintf(buf, sizeof(buf), LV_SYMBOL_BLUETOOTH " pair \"%s %u\" on the new device",
                  BLE_DEVICE_NAME, ble.slot + 1);
     } else if (ble.slotUsed[ble.slot]) {
-        snprintf(buf, sizeof(buf), LV_SYMBOL_BLUETOOTH " waiting for the host");
+        snprintf(buf, sizeof(buf), LV_SYMBOL_BLUETOOTH " waiting for %s",
+                 ble.slotName[ble.slot][0] ? ble.slotName[ble.slot] : "the host");
     } else {
         snprintf(buf, sizeof(buf), LV_SYMBOL_BLUETOOTH " no host - hold BOOT to pair one");
     }
@@ -663,6 +999,8 @@ void ui_update(const char *bootNote)
         setText(passkeyLabel, buf);
     }
     setVisible(agentCard, bs.agentAsking && !ble.passkeyShown);
+    if (ui_menu_open())
+        updateMenu(ble);
 
     StatsSnapshot st;
     stats_get(st);

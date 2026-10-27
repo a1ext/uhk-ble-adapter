@@ -2,7 +2,8 @@
  * Touch UI (LVGL 8): the active slot's name as the title, the slot selector
  * (a little PCB: gold pads left / right of a bus, the active one neon),
  * keyboard / BLE status, typing statistics and the log tail. Pop-ups:
- * the pairing passkey and the UHK Agent "allow config access?" prompt.
+ * the pairing passkey, the UHK Agent "allow config access?" prompt and the
+ * settings menu (host name with an on-screen keyboard, standby animation).
  */
 #pragma once
 #include <stdint.h>
@@ -19,3 +20,7 @@ void ui_begin(const UiCallbacks &cb);
 void ui_set_hold_progress(uint16_t permille);
 // bootNote: shown when nothing more important is pending (e.g. crash recovery)
 void ui_update(const char *bootNote);
+// Settings menu of the active slot: also opened by a tap on the active slot
+void ui_open_menu();
+void ui_close_menu();
+bool ui_menu_open();

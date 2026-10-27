@@ -55,6 +55,7 @@ struct BleHidStatus {
     uint8_t  slot;                     // active host slot
     bool     slotUsed[BLE_SLOTS];      // a host is paired on the slot
     uint8_t  slotHost[BLE_SLOTS][6];   // its address
+    char     slotName[BLE_SLOTS][BLE_HOST_NAME_MAX + 1]; // its name given on the screen, "" = none
     uint32_t pairingLeftMs;            // > 0 while in pairing mode
     bool     passkeyShown;             // a host is pairing: show the passkey
     uint32_t passkey;                  // 6 digits, typed on the host
@@ -77,4 +78,7 @@ void ble_hid_select_slot(uint8_t slot);
 void ble_hid_start_pairing();       // active slot: discoverable, accepts a new device
 void ble_hid_stop_pairing();
 void ble_hid_forget_pairings();     // all slots
+// A name for the slot's host, shown instead of its address ("" = none). Kept
+// while that host stays on the slot, cleared when another host pairs there.
+void ble_hid_set_host_name(uint8_t slot, const char *name);
 void ble_hid_get_status(BleHidStatus &st);

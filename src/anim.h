@@ -53,6 +53,7 @@ struct AnimSettings {
 void anim_begin();                          // loads the stored animation and the settings
 bool anim_available();                      // a valid animation is stored
 const AnimSettings &anim_settings();
+void anim_set_settings(const AnimSettings &s); // from the screen's settings menu (Arduino loop)
 // Brightness for the standby animation / live spectrum at this time of day: night
 // level until 6:00, up to the day level by 9:00, back down 18:00..22:00; the day
 // level while the clock is not set (never set, or its backup cell ran flat)

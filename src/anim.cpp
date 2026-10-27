@@ -262,6 +262,13 @@ static void saveSettings()
     nvs.end();
 }
 
+static void logSettings()
+{
+    logf("Anim: standby %s after %u s, brightness %u / night %u, off after %u s",
+         settings.mode ? "animation" : "off", settings.delayS, settings.brightness,
+         settings.nightBrightness, settings.offAfterS);
+}
+
 static void sendInfo()
 {
     uint16_t frames = loaded ? hdr.frames : 0;
@@ -302,9 +309,7 @@ static AnimEvent handle(const Cmd &c)
             if (c.len >= 8)
                 settings.nightBrightness = max<uint8_t>(1, c.data[7]);
             saveSettings();
-            logf("Anim: standby %s after %u s, brightness %u / night %u, off after %u s",
-                 settings.mode ? "animation" : "off", settings.delayS, settings.brightness,
-                 settings.nightBrightness, settings.offAfterS);
+            logSettings();
         }
         break;
     case 0x13:
@@ -422,4 +427,17 @@ bool anim_available()
 const AnimSettings &anim_settings()
 {
     return settings;
+}
+
+void anim_set_settings(const AnimSettings &s)
+{
+    if (s.mode == settings.mode && s.delayS == settings.delayS && s.brightness == settings.brightness
+        && s.offAfterS == settings.offAfterS && s.nightBrightness == settings.nightBrightness)
+        return;
+    settings = s;
+    settings.delayS = max<uint16_t>(5, settings.delayS);
+    settings.brightness = max<uint8_t>(1, settings.brightness);
+    settings.nightBrightness = max<uint8_t>(1, settings.nightBrightness);
+    saveSettings();
+    logSettings();
 }

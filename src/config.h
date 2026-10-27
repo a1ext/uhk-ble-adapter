@@ -37,6 +37,8 @@ static constexpr float    MOUSE_CPI     = 800;
 static constexpr uint8_t     BLE_SLOTS        = 5;
 static constexpr const char *BLE_DEVICE_NAME  = "UHK60 BLE";
 static constexpr const char *BLE_MANUFACTURER = "DIY";
+// Host names typed on the screen ("MacBook", "Pixel"): ASCII, at most this long
+static constexpr uint8_t     BLE_HOST_NAME_MAX = 20;
 // UHK Agent over BLE: the keyboard's vendor command interface (usage page
 // 0xFF00, usage 1) gets its own HID service (a separate HID device on the
 // host, no report IDs - like the USB interface), and the BLE PnP ID is the
