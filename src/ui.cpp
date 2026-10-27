@@ -686,7 +686,8 @@ void ui_update(const char *bootNote)
     char otaBuf[64];
     const char *note = bs.note ? bs.note : bootNote ? bootNote : "";
     if (ota.active && ota.total) {
-        snprintf(otaBuf, sizeof(otaBuf), LV_SYMBOL_DOWNLOAD " Firmware update %lu%%  (%lu / %lu KB)",
+        snprintf(otaBuf, sizeof(otaBuf), LV_SYMBOL_DOWNLOAD " %s %lu%%  (%lu / %lu KB)",
+                 ota.animation ? "Animation upload" : "Firmware update",
                  (unsigned long)((uint64_t)ota.received * 100 / ota.total),
                  (unsigned long)(ota.received / 1024), (unsigned long)(ota.total / 1024));
         note = otaBuf;

@@ -1,12 +1,13 @@
-"""Renders the adapter's screen (src/ui.cpp with LVGL) on a PC into the README /
-web page screenshots docs/img/screen-*.png.
+"""Renders the adapter's screen (src/ui.cpp with LVGL, the live spectrum of
+src/live.cpp, the matrix standby animation) on a PC into the README / web page
+screenshots docs/img/screen-*.png.
 
     python tools/ui_sim/render.py
 
 Needs:
 - gcc / g++ on PATH (Windows: e.g. TDM-GCC or MSYS2 MinGW; override with CC / CXX);
 - LVGL from PlatformIO's libdeps: run `pio run` once (or pass --lvgl);
-- Python 3 with Pillow (`pip install pillow`).
+- Python 3 with Pillow and numpy (`pip install pillow numpy`).
 
 The scenes and their canned status data are in sim.cpp. LVGL objects are cached
 in .pio/ui_sim, so only the first run compiles LVGL. Besides the screenshots it
@@ -24,7 +25,7 @@ from PIL import Image, ImageDraw
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 W, H = 536, 240
-SCREENSHOTS = ["screen-bt", "screen-passkey", "screen-agent"]
+SCREENSHOTS = ["screen-bt", "screen-passkey", "screen-agent", "screen-live"]
 FRAMES = ["anim-spark", "anim-pop"]
 
 
@@ -35,9 +36,10 @@ def run(cmd, cwd=None):
 
 
 def build_stamp():
-    """__DATE__ / __TIME__ for ui.cpp: the last commit's time, so a commit
-    always renders the same screenshots (the screen shows the build time)."""
-    r = subprocess.run(["git", "log", "-1", "--format=%cd", "--date=format:%b %e %Y|%H:%M:%S"],
+    """__DATE__ / __TIME__ for ui.cpp: the time of the last commit that touched
+    src/, so the same firmware always renders the same screenshots (the screen
+    shows the build time), also after the screenshots themselves are committed."""
+    r = subprocess.run(["git", "log", "-1", "--format=%cd", "--date=format:%b %e %Y|%H:%M:%S", "--", "src"],
                        cwd=ROOT, capture_output=True, text=True)
     date, _, time = r.stdout.strip().partition("|")
     return (date, time) if time else ("Jan  1 2026", "00:00:00")
@@ -87,9 +89,10 @@ def main():
     date, time = build_stamp()
     stamp = ["-Wno-builtin-macro-redefined", f'-D__DATE__="{date}"', f'-D__TIME__="{time}"']
     run([cxx, "-std=gnu++17", *flags, *stamp, "-c", str(ROOT / "src" / "ui.cpp"), "-o", str(build / "ui.o")])
+    run([cxx, "-std=gnu++17", *flags, "-c", str(ROOT / "src" / "live.cpp"), "-o", str(build / "live.o")])
     run([cxx, "-std=gnu++17", *flags, "-c", str(HERE / "sim.cpp"), "-o", str(build / "sim.o")])
     exe = build / ("uisim.exe" if os.name == "nt" else "uisim")
-    run([cxx, "-o", str(exe), str(build / "sim.o"), str(build / "ui.o"), *map(str, objs)])
+    run([cxx, "-o", str(exe), str(build / "sim.o"), str(build / "ui.o"), str(build / "live.o"), *map(str, objs)])
     run([str(exe)], cwd=build)
 
     args.out.mkdir(parents=True, exist_ok=True)
@@ -99,6 +102,27 @@ def main():
         print(args.out / f"{name}.png")
     for name in FRAMES:
         Image.frombytes("RGB", (W, H), (build / f"{name}.rgb").read_bytes()).save(build / f"{name}.png")
+
+    frame(matrix_frame()).save(args.out / "screen-matrix.png", optimize=True)
+    print(args.out / "screen-matrix.png")
+
+
+def matrix_frame(index=40):
+    """A frame of the matrix demo, encoded and decoded the way the adapter plays it."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import anim_demos
+    import numpy as np
+    import uanm
+    scale = 2
+    blob = uanm.encode([uanm.fit(f, scale) for f in anim_demos.matrix_rain()], 40, scale)
+    v = uanm.decode(blob)[index]
+    v = (((v >> 8) | (v << 8)) & 0xFFFF).astype(np.uint32)       # back to plain RGB565
+    rgb = np.dstack([((v >> 11) & 31) * 255 // 31, ((v >> 5) & 63) * 255 // 63, (v & 31) * 255 // 31])
+    pic = Image.fromarray(rgb.astype(np.uint8))
+    pic = pic.resize((pic.width * scale, pic.height * scale), Image.NEAREST)
+    out = Image.new("RGB", (W, H))
+    out.paste(pic, (((W - pic.width) // 2) & ~1, ((H - pic.height) // 2) & ~1))
+    return out
 
 
 if __name__ == "__main__":

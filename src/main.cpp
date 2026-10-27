@@ -8,10 +8,12 @@
 #include <Arduino.h>
 #include <esp_system.h>
 #include <lvgl.h>
+#include "anim.h"
 #include "ble_hid.h"
 #include "bridge.h"
 #include "config.h"
 #include "display.h"
+#include "live.h"
 #include "log.h"
 #include "ota.h"
 #include "stats.h"
@@ -20,9 +22,25 @@
 static const char *bootNote = nullptr;
 static uint32_t    lastActivityMs = 0;
 static uint8_t     screenLevel = DISPLAY_BRIGHTNESS; // where the brightness is heading
+static bool        standbyDone = false;  // the standby animation ran its course until the next activity
+static bool        animByCommand = false; // started by the computer, not by idling
+static uint32_t    liveSuppressUntil = 0; // the live spectrum waits after the user took the screen
+static const uint32_t LIVE_RESUME_MS = 30000;
+
+// The standby animation or the live spectrum owns the panel; LVGL is paused meanwhile
+static bool panelTaken()
+{
+    return anim_playing() || live_active();
+}
 
 static void wakeScreen()
 {
+    if (live_active()) { // the user wants the normal screen; the spectrum returns after a pause
+        live_stop();
+        liveSuppressUntil = millis() + LIVE_RESUME_MS;
+    }
+    anim_stop();
+    standbyDone = false;
     lastActivityMs = millis();
     screenLevel = DISPLAY_BRIGHTNESS;
     display_set_brightness(DISPLAY_BRIGHTNESS);
@@ -116,14 +134,15 @@ static lv_indev_t *touchIndev()
 }
 
 // Any touch is activity. A touch on a dark (or fading out) screen only wakes
-// it: LVGL does not see it, so nothing on the screen is tapped blindly.
+// it: LVGL does not see it, so nothing on the screen is tapped blindly. The same
+// for a touch that stops the standby animation.
 static void pollTouch()
 {
     static bool swallowing = false;
     int16_t x, y;
     bool touched = display_get_touch(&x, &y);
     if (touched) {
-        if ((screenLevel == 0 || display_brightness() == 0) && !swallowing) {
+        if ((screenLevel == 0 || display_brightness() == 0 || anim_playing() || live_active()) && !swallowing) {
             swallowing = true;
             if (lv_indev_t *in = touchIndev()) {
                 lv_indev_reset(in, nullptr);
@@ -135,6 +154,20 @@ static void pollTouch()
         swallowing = false;
         if (lv_indev_t *in = touchIndev())
             lv_indev_enable(in, true);
+    }
+}
+
+static uint8_t liveLevel()
+{
+    return live_brightness() ? live_brightness() : anim_brightness_now();
+}
+
+// The standby animation / live spectrum follow the time of day while they play
+static void followDaylight(uint8_t level)
+{
+    if (level != screenLevel) {
+        screenLevel = level;
+        display_set_brightness(level);
     }
 }
 
@@ -156,7 +189,32 @@ static void updateScreenPower()
         wakeScreen();
     }
 
+    if (live_active()) { // streamed by the computer: no standby, no dimming
+        followDaylight(liveLevel());
+        return;
+    }
     uint32_t idle = millis() - lastActivityMs;
+    const AnimSettings &as = anim_settings();
+    if (anim_playing()) {
+        // Burn-in protection still applies to a standby animation left running
+        if (!animByCommand && as.offAfterS && anim_played_ms() > as.offAfterS * 1000UL) {
+            anim_stop();
+            standbyDone = true;
+            screenLevel = 0;
+            display_fade_to(0, SCREEN_FADE_MS);
+        } else {
+            followDaylight(anim_brightness_now());
+        }
+        return;
+    }
+    if (as.mode == ANIM_MODE_STANDBY && anim_available() && !standbyDone && screenLevel > 0
+        && idle > as.delayS * 1000UL) {
+        animByCommand = false;
+        anim_start();
+        screenLevel = anim_brightness_now();
+        display_set_brightness(screenLevel);
+        return;
+    }
     uint8_t level = idle > SCREEN_OFF_MS ? 0
                   : idle > SCREEN_DIM_MS ? DISPLAY_DIM_BRIGHTNESS : DISPLAY_BRIGHTNESS;
     if (level < screenLevel) { // only dims here, wakeScreen() brightens
@@ -183,6 +241,7 @@ void setup()
 
     if (!display_begin())
         logf("Display init failed");
+    anim_begin();   // standby animation from the data partition
     bridge_begin(); // loads the cached HID map and the BLE host slots
     ui_begin({onSlotRequest, onPair, onPairCancel, onAgentAllow});
     // Draw the first frame now: BLE / USB host start below can take a while
@@ -203,13 +262,48 @@ void loop()
     ota_loop(ble_hid_ready());
     stats_loop(screenLevel == 0);
 
+    switch (anim_loop()) {
+    case ANIM_EV_PLAY: // from the computer: play now, until stopped or touched
+        wakeScreen();
+        animByCommand = true;
+        anim_start();
+        screenLevel = anim_brightness_now();
+        display_set_brightness(screenLevel);
+        break;
+    case ANIM_EV_STOP:
+        wakeScreen();
+        break;
+    default:
+        break;
+    }
+
+    // Live spectrum: starts with the stream, ends when it stops
+    OtaStatus ota;
+    ota_get_status(ota);
+    if (live_take_fresh())
+        liveSuppressUntil = millis(); // a new stream shows right away
+    if (!live_active() && live_streaming() && !ota.active
+        && (int32_t)(millis() - liveSuppressUntil) >= 0) {
+        anim_stop();
+        standbyDone = false;
+        live_start();
+        screenLevel = liveLevel();
+        display_set_brightness(screenLevel);
+    } else if (live_active() && (!live_streaming() || ota.active)) {
+        live_stop();
+        wakeScreen();
+    }
+    live_loop();
+
     uint32_t now = millis();
     if (now >= nextUiMs) {
         nextUiMs = now + 100;
         updateScreenPower();
-        ui_update(bootNote);
+        if (!panelTaken())
+            ui_update(bootNote);
     }
     display_loop();
-    lv_task_handler();
-    delay(5);
+    if (!panelTaken())
+        lv_task_handler();
+    delay(panelTaken() ? 1 : 5);
 }

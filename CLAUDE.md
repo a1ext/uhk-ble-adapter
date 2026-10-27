@@ -33,6 +33,14 @@ pin (USB port or charger).
   unconnected) → polyfuse ~1 A → header VBUS; 100–220 µF bulk cap near the board.
 - Wiring / pinout pictures for users: `docs/img/pinout.svg`, `docs/img/wiring.svg` (shown on
   the Pages site and in the README).
+- Power daughter board (`doughter_board/`, Altium; project file currently under
+  `M:\bt-rf-backend\docs\hardware\DaughterBoard\`): USB-C sink (5.1k Rd, D± 15k to GND), PTC
+  1.1 A, 47µ/10µ/1µ/100n, male 1×4 pins onto LilyGo pins 11–14 of both rows. Layout source of
+  truth: `pcb_layout.py` (+ `silk_check.py`); LilyGo frame: DXF/STEP have USB-C at y = 0, pins
+  11–14 at y 23.54…15.92 (15.9–23.5 mm from the USB-C edge). The board lies component side on
+  the case back (sockets flush, ~2.3 mm of pin, header plastic removed); everything except the
+  pins sits on a tab beyond the VBUS-side case wall, USB-C facing away from the LilyGo.
+  3D-printed shell (Fusion): `doughter_board/shell/` (Lid + Tray, M1.2 screws, PRINT.md).
 
 ## Keyboard facts (USBTreeView + UHK firmware sources, right/src/hid/*_app.hpp)
 - VID:PID **0x37A8:0x0003** ("Ultimate Gadget Laboratories", "UHK 60 v2")
@@ -173,6 +181,38 @@ pin (USB port or charger).
   in counts, shown as metres at `MOUSE_CPI` (800). Totals in NVS ("stats": keys, clicks,
   travel), written every `STATS_SAVE_MS` (1 h), when the screen goes dark and before OTA /
   descriptor-change restarts — a crash loses at most an hour.
+- `src/anim.*` — standby animations: one UANM file (format in anim.h: RGB565 byte-swapped,
+  per-frame delta tokens skip / run / literal, scale 1 or 2 = pixel-doubled) in the unused
+  "spiffs" data partition (3.4 MB), played straight to the panel (`display_push`) while
+  LVGL is paused. Uploaded through the OTA service with begin op 0x03 — no reboot: the
+  player stops, the partition is written, SHA-256 + header/index checked, then reloaded.
+  OTA control commands 0x10 play / 0x11 stop / 0x12 settings / 0x13 info (NVS "anim":
+  mode, delay, brightness, off-after; default standby after 60 s idle, brightness 80, screen
+  off after 30 min of animation). Touch stops it (the touch is swallowed); keyboard typing
+  does not count as activity. PC side: `tools/ble_anim.py` (make / preview / upload / play /
+  stop / info / set; input = `demo:<name>` from `tools/anim_demos.py`, GIF / WebP / PNG
+  folder, or .uanm), encoder `tools/uanm.py`, shared WinRT link `tools/ble_link.py`
+  (also used by ble_ota.py).
+- `src/live.*` — live audio spectrum: `tools/ble_live.py` captures the PC's output (WASAPI
+  loopback via `soundcard`), FFT → 8..64 log bands, sends only levels ("LV" 01 <bright>
+  <u8 × n>, ~50 B at 60 fps) on the OTA **data** characteristic while no transfer runs;
+  the adapter draws neon bars + reflection + falling peak caps, pushing only the changed
+  rows of each bar (the Plus panel is 1-bit SPI at 40 MHz: a full screen takes ~51 ms).
+  Starts with the stream, ends 1.5 s after the last packet or on "LV" 00; touch / button /
+  pop-up shows the normal screen, the spectrum returns after 30 s (a restarted stream at
+  once). Pattern from `M:\!hw\VFD\sketch_aug15a\vfd_spectrum.py`.
+- Brightness of the standby animation / live spectrum follows the time of day
+  (`anim_brightness_now()`): night level (default 30) until 6:00, up to the day level
+  (default 180) by 9:00, down again 18:00–22:00, smoothstep in perceived brightness. Clock
+  = the board's PCF85063 RTC (I2C 0x51), backed by a rechargeable MS412FE cell (U8, charged
+  from 3V3 via D9 — it keeps time without power); `ble_link.py` sets local time (OTA control
+  command 0x14) on every connection. RTC OS flag set = not valid → day level.
+- **Do not change the GATT attribute table** (adding a characteristic to the OTA service
+  broke it, 2026-10-27): Windows caches the table of a bonded device; after the change
+  uncached characteristic discovery of that service threw "device does not recognize the
+  command" (also after an adapter reset) — only re-pairing would fix it. Reverting the table
+  fixed it; `ble_link.py` falls back to Windows' cached characteristics, so an OTA still works
+  in that state.
 - `src/ui.*` — title = the active slot's BLE name ("UHK60 BLE n"; blue when the host is
   authenticated, neon while pairing, grey otherwise); slot selector on the right: a
   little PCB (custom draw on the 116 px strip object, no board outline; each slot's tap
@@ -187,7 +227,8 @@ pin (USB port or charger).
   "Pair" button (hold 1.5 s = pairing mode, tap during pairing = cancel, countdown shown);
   status lines, log tail. Pop-up cards on the top layer: pairing passkey, UHK Agent "allow
   config access?". README / Pages screenshots (`docs/img/screen-*.png`) are rendered from
-  `src/ui.cpp` with LVGL on a PC: `python tools/ui_sim/render.py` (gcc/g++ — TDM-GCC here —
+  `src/ui.cpp` with LVGL on a PC (also `screen-live` from `src/live.cpp` with canned band
+  levels, and `screen-matrix` = a matrix demo frame through uanm encode / decode): `python tools/ui_sim/render.py` (gcc/g++ — TDM-GCC here —
   Pillow, LVGL from .pio/libdeps; objects cached in .pio/ui_sim; scenes + stubbed status
   in `tools/ui_sim/sim.cpp`; __DATE__/__TIME__ = last commit time so renders are
   reproducible; also leaves anim-*.png slot-switch frames in .pio/ui_sim). Re-render

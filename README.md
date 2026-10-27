@@ -38,6 +38,10 @@ LilyGo T-Display-S3 AMOLED Plus. Hardware and firmware details are in
 - **Wireless updates of the adapter.** New firmware goes over Bluetooth into
   the second app slot while the keyboard keeps typing. If the new firmware
   fails before a host reconnects, the adapter rolls back to the previous one.
+- **Standby animation and live audio spectrum.** When idle, the screen plays
+  an animation uploaded from the PC (no reboot). Or it shows the spectrum of
+  whatever the PC is playing, streamed live. Their brightness follows the time
+  of day. See [Screen animations](#screen-animations).
 
 <table>
   <tr>
@@ -49,6 +53,95 @@ LilyGo T-Display-S3 AMOLED Plus. Hardware and firmware details are in
     <td align="center">UHK Agent asks before touching the config</td>
   </tr>
 </table>
+
+## Screen animations
+
+<table>
+  <tr>
+    <td><img src="docs/img/screen-matrix.png" width="400" alt="Standby animation: green digital rain of letters and digits on black"></td>
+    <td><img src="docs/img/screen-live.png" width="400" alt="Live spectrum: 48 bars from pink (bass) through violet to teal (treble), with peak caps above them and a dim reflection below"></td>
+  </tr>
+  <tr>
+    <td align="center">Standby animation (the built-in <code>matrix</code> demo)</td>
+    <td align="center">Live spectrum of the PC's audio</td>
+  </tr>
+</table>
+
+Both are controlled from the PC that is paired on the active slot, over the same
+encrypted Bluetooth link as the keyboard. The tools run on **Windows** for now
+(see [Linux and macOS](#linux-and-macos)) and need Python with
+`pip install bleak numpy pillow`, plus `soundcard` for the live spectrum.
+
+### Standby animation
+
+```bash
+python tools/ble_anim.py upload demo:matrix   # or a .gif / .webp, a folder of PNGs, a .uanm file
+python tools/ble_anim.py play                 # show it now (also: stop)
+python tools/ble_anim.py info                 # what is stored, settings, the adapter's clock
+```
+
+- The animation is stored on the adapter (up to 3.4 MB) and plays after 60 s
+  without a touch. A touch or the BOOT button brings the normal screen back;
+  typing on the keyboard does not stop it. After 30 minutes of animation the
+  screen goes dark (AMOLED burn-in).
+- Uploading takes a few seconds (~45 KB/s, the matrix demo is 610 KB). The
+  adapter does not reboot, and the keyboard keeps typing.
+- Pictures are fitted to the 536 × 240 screen. `--scale 2` (the default)
+  stores half resolution and doubles the pixels: 4× less data. Try
+  `make` and `preview` first: they build the file and a GIF that shows exactly
+  what the adapter will play.
+- Settings (unset options keep their value):
+  `python tools/ble_anim.py set --delay 120 --off-after 3600 --mode off`.
+
+### Live spectrum
+
+```bash
+python tools/ble_live.py --agc
+```
+
+- Captures what the PC plays (WASAPI loopback), runs the FFT on the PC and
+  sends only the band levels: about 50 bytes per frame, 60 frames/s. The
+  adapter draws the bars, the falling peak caps and the reflection itself, so
+  the keyboard's traffic is not affected.
+- Audio-to-screen delay is roughly 40–70 ms (estimated: capture, FFT window,
+  Bluetooth, drawing).
+- The spectrum appears as soon as the stream starts and disappears 1.5 s after
+  it stops (Ctrl-C). A touch shows the normal screen; the spectrum comes back
+  after 30 s.
+- `--agc` adjusts the gain slowly, so quiet music still fills the bars.
+  `--bands 8..64`, `--device <speaker>` (list them with `--list`),
+  `--test` (a sweep, no audio needed), `--brightness N` (fixed instead of by
+  the time of day).
+
+### Brightness by the time of day
+
+The animation and the spectrum are dimmer at night and brighter by day:
+
+| Time | 22:00–6:00 | 7:00 | 8:00 | 9:00–18:00 | 19:00 | 20:00 | 21:00 |
+|---|---|---|---|---|---|---|---|
+| Brightness (of 255) | 30 | 56 | 128 | 180 | 147 | 88 | 45 |
+
+```bash
+python tools/ble_anim.py set --brightness 200 --night 20   # day / night levels
+```
+
+The adapter's clock is the board's RTC, which has a rechargeable backup cell.
+Every connection of the tools sets it to the PC's local time. Until it has
+been set, the day level is used.
+
+### Linux and macOS
+
+The tools use Windows' own Bluetooth connection to the paired adapter (WinRT,
+via the projections that `bleak` installs). The adapter does not advertise
+while its host is connected, so there is nothing to scan for. Porting would
+mean:
+- **Bluetooth:** Linux (BlueZ) lets an app use the GATT services of a device
+  the system is already connected to, so `bleak` can do it there. macOS needs
+  CoreBluetooth's `retrieveConnectedPeripheralsWithServices`, which `bleak`
+  does not expose.
+- **Audio capture:** `soundcard` records the output's monitor source on Linux
+  (PulseAudio / PipeWire). macOS has no loopback; a virtual device such as
+  BlackHole is needed.
 
 ## Build
 
@@ -151,14 +244,15 @@ create a release. For tags to deploy too, allow `v*` under **Settings →
 Environments → github-pages**.
 
 The screenshots in `docs/img` are rendered from the real UI code (`src/ui.cpp`
-with LVGL, on a PC) after UI changes, not in CI:
+with LVGL and `src/live.cpp`, on a PC; the matrix frame goes through the same
+encoder and decoder as an upload) after UI changes, not in CI:
 
 ```bash
 python tools/ui_sim/render.py
 ```
 
-It needs gcc / g++ on PATH (on Windows e.g. TDM-GCC or MSYS2 MinGW), Pillow
-(`pip install pillow`) and LVGL from PlatformIO (`pio run` once). The scenes
+It needs gcc / g++ on PATH (on Windows e.g. TDM-GCC or MSYS2 MinGW), Pillow and
+numpy (`pip install pillow numpy`) and LVGL from PlatformIO (`pio run` once). The scenes
 and their canned data are in `tools/ui_sim/sim.cpp`.
 
 ### Over Bluetooth (OTA, from Windows) — the usual way
@@ -213,6 +307,9 @@ pio run -t upload
 - **"OTA service not found"** — the adapter runs firmware without OTA (flash it
   over USB the first time), or Windows cached an old service list: remove the
   adapter in the Windows Bluetooth settings and pair it again.
+- **"OTA characteristic … not found" right after another tool** — Windows
+  keeps the service busy for a while after a tool was killed instead of
+  stopped with Ctrl-C. Wait ~20 s and run it again.
 - **"no paired device named 'UHK60 BLE*'"** — the adapter is not paired: hold
   BOOT for 1.5 s (bar along the bottom of the screen), then
   add the device in Windows within 20 s and type the 6-digit code the adapter

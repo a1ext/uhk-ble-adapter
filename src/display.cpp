@@ -1,6 +1,7 @@
 #include "display.h"
 #include <LilyGo_AMOLED.h>
 #include <LV_Helper.h>
+#include <Wire.h>
 #include <math.h>
 #include "config.h"
 
@@ -80,4 +81,46 @@ uint8_t display_brightness()
 bool display_get_touch(int16_t *x, int16_t *y)
 {
     return amoled.getPoint(x, y) > 0;
+}
+
+uint16_t display_width()
+{
+    return amoled.width();
+}
+
+uint16_t display_height()
+{
+    return amoled.height();
+}
+
+void display_push(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t *pixels)
+{
+    amoled.pushColors(x, y, w, h, pixels);
+}
+
+static const uint8_t PCF85063_ADDR = 0x51, PCF85063_SECONDS = 0x04, PCF85063_OS = 0x80;
+
+bool display_rtc_read(uint8_t &hour, uint8_t &minute, uint8_t &second)
+{
+    if (!amoled.hasRTC())
+        return false;
+    // OS flag: the oscillator stopped (power loss) since the time was last set
+    Wire.beginTransmission(PCF85063_ADDR);
+    Wire.write(PCF85063_SECONDS);
+    if (Wire.endTransmission(false) != 0 || Wire.requestFrom(PCF85063_ADDR, (uint8_t)1) != 1
+        || (Wire.read() & PCF85063_OS))
+        return false;
+    RTC_DateTime t = amoled.getDateTime();
+    if (t.hour > 23 || t.minute > 59 || t.second > 59)
+        return false;
+    hour = t.hour;
+    minute = t.minute;
+    second = t.second;
+    return true;
+}
+
+void display_rtc_write(uint16_t year, uint8_t month, uint8_t day, uint8_t hour, uint8_t minute, uint8_t second)
+{
+    if (amoled.hasRTC())
+        amoled.setDateTime(year, month, day, hour, minute, second); // also clears the OS flag
 }

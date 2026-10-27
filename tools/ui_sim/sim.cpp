@@ -1,12 +1,15 @@
-// Renders the adapter's real UI (src/ui.cpp) on a PC with canned status data
-// and writes raw frames <name>.rgb (536 x 240, RGB888) into the current
-// directory. Built and run by render.py.
+// Renders the adapter's real UI (src/ui.cpp) and live spectrum (src/live.cpp)
+// on a PC with canned data and writes raw frames <name>.rgb (536 x 240, RGB888)
+// into the current directory. Built and run by render.py.
 #include <lvgl.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include "ble_hid.h"
 #include "bridge.h"
 #include "config.h"
+#include "display.h"
+#include "live.h"
 #include "log.h"
 #include "ota.h"
 #include "stats.h"
@@ -73,6 +76,48 @@ static void shot(const char *name)
     }
     fclose(f);
     printf("%s\n", path);
+}
+
+// ---------------- Raw panel for live.cpp (byte-swapped RGB565, like the panel) ----------------
+static uint16_t panel[W * H];
+uint16_t display_width() { return W; }
+uint16_t display_height() { return H; }
+void display_push(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t *px)
+{
+    for (int r = 0; r < h; r++)
+        memcpy(&panel[(y + r) * W + x], px + r * w, 2 * w);
+}
+
+static void shotPanel(const char *name)
+{
+    char path[64];
+    snprintf(path, sizeof(path), "%s.rgb", name);
+    FILE *f = fopen(path, "wb");
+    for (int i = 0; i < W * H; i++) {
+        uint16_t v = panel[i] >> 8 | panel[i] << 8;
+        uint8_t r = v >> 11, g = v >> 5 & 63, b = v & 31;
+        uint8_t rgb[3] = {(uint8_t)(r << 3 | r >> 2), (uint8_t)(g << 2 | g >> 4), (uint8_t)(b << 3 | b >> 2)};
+        fwrite(rgb, 1, 3, f);
+    }
+    fclose(f);
+    printf("%s\n", path);
+}
+
+// Music-like band levels: kick drum in the bass, a vocal hump, falling treble
+static void liveFrame(int frame, int kickFrame)
+{
+    const int N = 48;
+    uint8_t pkt[3 + 1 + N] = {'L', 'V', 0x01, 0};
+    float since = (frame - kickFrame) * 16.0f;
+    float kick = since >= 0 ? expf(-since / 140.0f) : 0;
+    for (int b = 0; b < N; b++) {
+        float x = (float)b / (N - 1);
+        float shape = 0.62f * expf(-x * 9) + 0.55f * expf(-powf((x - 0.45f) / 0.16f, 2)) + 0.38f * (1 - x) + 0.08f;
+        float wobble = 0.12f * sinf(b * 1.7f + frame * 0.31f) + 0.08f * sinf(b * 3.1f - frame * 0.53f);
+        float lv = shape * (0.72f + 0.28f * kick * (1.2f - x)) + wobble;
+        pkt[4 + b] = (uint8_t)fminf(255, fmaxf(0, lv * 255));
+    }
+    live_packet(pkt, sizeof(pkt));
 }
 
 static void nop(bool) {}
@@ -167,5 +212,15 @@ int main()
     ui_update(nullptr);
     run(1500);
     shot("screen-agent");
+
+    // Live spectrum: a second of music at 60 fps, the shot ~0.2 s after a kick,
+    // so the peak caps float above the falling bars
+    live_start();
+    for (int f = 0; f <= 58; f++) {
+        liveFrame(f, f < 45 ? 20 : 45);
+        live_loop();
+        nowMs += 16;
+    }
+    shotPanel("screen-live");
     return 0;
 }

@@ -6,8 +6,10 @@
 #include <esp_ota_ops.h>
 #include <freertos/stream_buffer.h>
 #include <mbedtls/sha256.h>
+#include "anim.h"
 #include "ble_hid.h"
 #include "config.h"
+#include "live.h"
 #include "log.h"
 #include "stats.h"
 
@@ -25,11 +27,12 @@ static const size_t   STREAM_SIZE     = 16384;           // > the host window (1
 static const uint32_t ACK_EVERY       = 4096;
 
 enum : uint8_t {
-    OTA_ST_RECEIVING = 0x01, OTA_ST_DONE = 0x02,
+    OTA_ST_RECEIVING = 0x01, OTA_ST_DONE = 0x02, OTA_ST_STORED = 0x03,
     OTA_ERR_BEGIN = 0x81, OTA_ERR_OVERFLOW = 0x82, OTA_ERR_WRITE = 0x83, OTA_ERR_IMAGE = 0x84,
     OTA_ERR_SHA = 0x85, OTA_ERR_SIZE = 0x86, OTA_ERR_ABORTED = 0x87, OTA_ERR_TIMEOUT = 0x88,
+    OTA_ERR_ANIM = 0x89,
 };
-enum : uint8_t { CMD_BEGIN = 0x01, CMD_ABORT = 0x02 };
+enum : uint8_t { CMD_BEGIN = 0x01, CMD_ABORT = 0x02, CMD_BEGIN_ANIM = 0x03 };
 
 struct Req {
     uint8_t  cmd;
@@ -41,6 +44,7 @@ static BLECharacteristic *ctrlChr;
 static StreamBufferHandle_t stream;
 static QueueHandle_t reqQueue;
 static volatile bool     active = false;     // between begin and end / abort
+static volatile bool     toAnim = false;     // the transfer is an animation, not firmware
 static volatile bool     overflow = false;
 static volatile uint32_t received = 0, total = 0;
 static volatile bool     restartPending = false;
@@ -63,8 +67,13 @@ class CtrlCallbacks : public BLECharacteristicCallbacks {
             return;
         std::string v = c->getValue();
         Req r{};
-        if (v.size() >= 37 && (uint8_t)v[0] == CMD_BEGIN) {
-            r.cmd = CMD_BEGIN;
+        uint8_t op = v.empty() ? 0 : (uint8_t)v[0];
+        if (op >= 0x10 && op <= 0x1F) { // standby animation control
+            anim_command((const uint8_t *)v.data(), v.size());
+            return;
+        }
+        if (v.size() >= 37 && (op == CMD_BEGIN || op == CMD_BEGIN_ANIM)) {
+            r.cmd = op;
             memcpy(&r.size, v.data() + 1, 4); // little-endian, like the ESP32
             memcpy(r.sha, v.data() + 5, 32);
         } else if (v.size() >= 1 && (uint8_t)v[0] == CMD_ABORT) {
@@ -79,9 +88,13 @@ class CtrlCallbacks : public BLECharacteristicCallbacks {
 class DataCallbacks : public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic *c) override
     {
-        if (!active || !ble_hid_ready())
+        if (!ble_hid_ready())
             return;
         std::string v = c->getValue();
+        if (!active) { // no transfer: live spectrum packets (live.h)
+            live_packet((const uint8_t *)v.data(), v.size());
+            return;
+        }
         // The host keeps its window below the buffer size; no room = it did not
         if (xStreamBufferSend(stream, v.data(), v.size(), 0) != v.size())
             overflow = true;
@@ -99,10 +112,13 @@ static void otaTask(void *)
     uint32_t lastAck = 0, lastDataMs = 0;
 
     auto fail = [&](uint8_t err, const char *why) {
-        esp_ota_abort(handle);
+        if (toAnim)
+            anim_storage_abort();
+        else
+            esp_ota_abort(handle);
         mbedtls_sha256_free(&sha);
         active = false;
-        logf("OTA: failed - %s", why);
+        logf("%s: failed - %s", toAnim ? "Anim upload" : "OTA", why);
         notifyState(err, received);
     };
 
@@ -116,21 +132,29 @@ static void otaTask(void *)
             }
             if (active)
                 fail(OTA_ERR_ABORTED, "restarted by the host");
-            part = esp_ota_get_next_update_partition(nullptr);
-            if (!part || r.size == 0 || r.size > part->size) {
-                logf("OTA: bad image size %lu", (unsigned long)r.size);
+            bool anim = r.cmd == CMD_BEGIN_ANIM;
+            part = anim ? nullptr : esp_ota_get_next_update_partition(nullptr);
+            uint32_t room = anim ? anim_storage_size() : part ? part->size : 0;
+            if (r.size == 0 || r.size > room) {
+                logf("%s: bad size %lu", anim ? "Anim upload" : "OTA", (unsigned long)r.size);
                 notifyState(OTA_ERR_SIZE, 0);
                 continue;
             }
-            logf("OTA: %lu bytes into %s, erasing...", (unsigned long)r.size, part->label);
+            logf("%s: %lu bytes, erasing...", anim ? "Anim upload" : "OTA", (unsigned long)r.size);
             xStreamBufferReset(stream);
             overflow = false;
             received = lastAck = 0;
             total = r.size;
+            toAnim = anim;
             memcpy(expected, r.sha, sizeof(expected));
-            esp_err_t e = esp_ota_begin(part, r.size, &handle); // erases the region (seconds)
-            if (e != ESP_OK) {
-                logf("OTA: begin failed: %s", esp_err_to_name(e));
+            // Firmware: the inactive app partition; animation: the data partition,
+            // the running firmware is not touched and nothing reboots
+            bool begun = anim ? anim_storage_begin(r.size)
+                              : esp_ota_begin(part, r.size, &handle) == ESP_OK; // erases (seconds)
+            if (!begun) {
+                if (anim)
+                    anim_storage_abort();
+                logf("%s: erase / begin failed", anim ? "Anim upload" : "OTA");
                 notifyState(OTA_ERR_BEGIN, 0);
                 continue;
             }
@@ -154,7 +178,7 @@ static void otaTask(void *)
                 fail(OTA_ERR_SIZE, "more data than announced");
                 continue;
             }
-            if (esp_ota_write(handle, buf, n) != ESP_OK) {
+            if (toAnim ? !anim_storage_write(received, buf, n) : esp_ota_write(handle, buf, n) != ESP_OK) {
                 fail(OTA_ERR_WRITE, "flash write");
                 continue;
             }
@@ -175,9 +199,18 @@ static void otaTask(void *)
             mbedtls_sha256_free(&sha);
             active = false;
             if (memcmp(got, expected, sizeof(got))) {
-                esp_ota_abort(handle);
-                logf("OTA: failed - SHA-256 mismatch");
+                if (toAnim)
+                    anim_storage_abort();
+                else
+                    esp_ota_abort(handle);
+                logf("%s: failed - SHA-256 mismatch", toAnim ? "Anim upload" : "OTA");
                 notifyState(OTA_ERR_SHA, received);
+                continue;
+            }
+            if (toAnim) {
+                bool ok = anim_storage_finish(); // the loop loads it, no reboot
+                logf("Anim upload: %s", ok ? "stored" : "not a valid UANM file");
+                notifyState(ok ? OTA_ST_STORED : OTA_ERR_ANIM, received);
                 continue;
             }
             esp_err_t e = esp_ota_end(handle); // validates the image (header, checksum, hash)
@@ -226,6 +259,8 @@ void ota_create_service(BLEServer *server)
                                                         BLECharacteristic::PROPERTY_WRITE_NR);
     data->setAccessPermissions(ESP_GATT_PERM_WRITE_ENC_MITM);
     data->setCallbacks(new DataCallbacks());
+    // Keep this attribute table as it is: Windows caches it for a bonded device,
+    // and after a change its uncached discovery of the service fails until re-pairing
     svc->start();
 }
 
@@ -258,9 +293,18 @@ void ota_loop(bool hostConnected)
     }
 }
 
+void ota_notify(const uint8_t *data, size_t n)
+{
+    if (!ctrlChr)
+        return;
+    ctrlChr->setValue((uint8_t *)data, n);
+    ctrlChr->notify();
+}
+
 void ota_get_status(OtaStatus &st)
 {
     st.active = active;
+    st.animation = toAnim;
     st.received = received;
     st.total = total;
     st.pendingVerify = pendingVerify;
