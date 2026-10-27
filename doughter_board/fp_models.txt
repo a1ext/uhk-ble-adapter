@@ -1,0 +1,10 @@
+USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal|C:\Program Files\KiCad\10.0\share\kicad\3dmodels\Connector_USB.3dshapes\USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal.step|0.0
+Fuse_1812_4532Metric|C:\Program Files\KiCad\10.0\share\kicad\3dmodels\Resistor_SMD.3dshapes\R_1812_4532Metric.step|0.0
+R_0603_1608Metric|C:\Program Files\KiCad\10.0\share\kicad\3dmodels\Resistor_SMD.3dshapes\R_0603_1608Metric.step|0.0
+C_0603_1608Metric|C:\Program Files\KiCad\10.0\share\kicad\3dmodels\Capacitor_SMD.3dshapes\C_0603_1608Metric.step|0.0
+C_1206_3216Metric|C:\Program Files\KiCad\10.0\share\kicad\3dmodels\Capacitor_SMD.3dshapes\C_1206_3216Metric.step|0.0
+CP_EIA-3528-21_Kemet-B|C:\Program Files\KiCad\10.0\share\kicad\3dmodels\Capacitor_Tantalum_SMD.3dshapes\CP_EIA-3528-21_Kemet-B.step|0.0
+CP_EIA-3216-18_Kemet-A|C:\Program Files\KiCad\10.0\share\kicad\3dmodels\Capacitor_Tantalum_SMD.3dshapes\CP_EIA-3216-18_Kemet-A.step|0.0
+PinSocket_1x04_P2.54mm_Vertical|C:\Program Files\KiCad\10.0\share\kicad\3dmodels\Connector_PinSocket_2.54mm.3dshapes\PinSocket_1x04_P2.54mm_Vertical.step|0.0
+PinHeader_1x04_P2.54mm_Vertical|C:\Program Files\KiCad\10.0\share\kicad\3dmodels\Connector_PinHeader_2.54mm.3dshapes\PinHeader_1x04_P2.54mm_Vertical.step|0.0
+USB_C_Receptacle_XKB_U262-16XN-4BVC11|C:\Program Files\KiCad\10.0\share\kicad\3dmodels\Connector_USB.3dshapes\USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal.step|0.0

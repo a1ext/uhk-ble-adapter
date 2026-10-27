@@ -1,2 +1,7 @@
 .pio/
 .vscode/
+__pycache__/
+# Altium workspace / backups
+doughter_board/History/
+doughter_board/__Previews/
+*.DsnWrk
