@@ -58,14 +58,36 @@ jobs:
           name: uhk-ble-adapter-${{ env.VERSION }}
           path: dist/
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: github.event_name != 'pull_request'
         with:
+          name: site
           path: site
+
+  # Windows tools as single .exe files (no Python needed): uhk-ble-live.exe (tray),
+  # uhk-ble-anim.exe; offered on the web page and attached to releases
+  tools:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build the executables
+        run: |
+          pip install pillow
+          python tools/build_exe.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uhk-ble-tools
+          path: dist/*.exe
 
   # Web installer on GitHub Pages (Settings -> Pages -> Source: GitHub Actions)
   pages:
-    needs: build
+    needs: [build, tools]
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
@@ -78,13 +100,25 @@ jobs:
       group: pages
       cancel-in-progress: false
     steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: site
+          path: site
+      - uses: actions/download-artifact@v4
+        with:
+          name: uhk-ble-tools
+          path: site/download
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
       - id: deploy
         uses: actions/deploy-pages@v4
 
   # Version tags (v1.0, ...) also get a GitHub release with both images:
-  # *-full.bin = flash at 0x0 (fresh board), *-ota.bin = for tools/ble_ota.py
+  # *-full.bin = flash at 0x0 (fresh board), *-ota.bin = for tools/ble_ota.py,
+  # and the Windows tools
   release:
-    needs: build
+    needs: [build, tools]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -92,9 +126,12 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
+          pattern: uhk-ble-*
           path: dist
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.bin
+          files: |
+            dist/*.bin
+            dist/*.exe
           generate_release_notes: true

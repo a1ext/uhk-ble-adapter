@@ -23,7 +23,8 @@ pin (USB port or charger).
     adapter. Flashing = BOOT held at power-up / Reset → ROM download over USB, or BLE OTA.
 - GPIO assignment:
   - The pairing button is the board's **BOOT** (GPIO0), at the bottom of the case: hold
-    1.5 s = pairing mode for the active slot, press while pairing = cancel. (BOOT held
+    1.5 s = pairing mode for the active slot, press while pairing = cancel, a short press
+    otherwise = settings menu. (BOOT held
     during power-up / reset still enters the ROM bootloader.) No extra buttons.
   - Spare: GPIO10, GPIO16, GPIO39–42 (header).
   - Taken / avoid: 0, 3, 45, 46 strapping; 1 PMU IRQ; 2/3 I2C (touch, RTC, PMU); 4 battery
@@ -31,8 +32,9 @@ pin (USB port or charger).
     15 RTC INT; 21 touch INT; 19/20 USB; 43/44 UART0.
 - Power input: USB 2.0 USB-C receptacle (5.1k Rd on CC1 and CC2 for C-to-C cables, D+/D-
   unconnected) → polyfuse ~1 A → header VBUS; 100–220 µF bulk cap near the board.
-- Wiring / pinout pictures for users: `docs/img/pinout.svg`, `docs/img/wiring.svg` (shown on
-  the Pages site and in the README).
+- Wiring / pinout pictures for users: `docs/img/power-board.svg` (power board circuit +
+  back-view placement), `docs/img/pinout.svg`, `docs/img/wiring.svg` (hand-wired),
+  `docs/img/shell.jpg` (shell render); shown on the Pages site and in the README.
 - Power daughter board (`doughter_board/`, Altium; project file currently under
   `M:\bt-rf-backend\docs\hardware\DaughterBoard\`): USB-C sink (5.1k Rd, D± 15k to GND), PTC
   1.1 A, 47µ/10µ/1µ/100n, male 1×4 pins onto LilyGo pins 11–14 of both rows. Layout source of
@@ -64,7 +66,8 @@ pin (USB port or charger).
   `$BUILD_DIR/uhk-ble-adapter.bin` (flash at 0x0, same flash params as upload: DIO, 80 MHz,
   16 MB) after every build. CI (`.github/workflows/build.yml`): builds on push / PR,
   deploys `docs/` + the merged image to Pages on push to master and on tags (manifest
-  version = `git describe`), tags `v*` → GitHub release with `-full.bin` and `-ota.bin`.
+  version = `git describe`), tags `v*` → GitHub release with `-full.bin` and `-ota.bin` (+ the Windows tool .exe files,
+  see `src/live.*`).
   Pages must be enabled once: Settings → Pages → Source: GitHub Actions.
 - USB: `pio run -t upload` — the running firmware owns the USB port (host), so enter
   the ROM bootloader first (BOOT + RST); disconnect the 5 V supply and the keyboard.
@@ -201,6 +204,26 @@ pin (USB port or charger).
   Starts with the stream, ends 1.5 s after the last packet or on "LV" 00; touch / button /
   pop-up shows the normal screen, the spectrum returns after 30 s (a restarted stream at
   once). Pattern from `M:\!hw\VFD\sketch_aug15a\vfd_spectrum.py`.
+  Standalone Windows executables (no Python needed): `python tools/build_exe.py [live]
+  [anim]` → own `.venv-build` (uv) + PyInstaller `--onefile`:
+  - `dist/uhk-ble-live.exe` (~30 MB, `--windowed`) of `tools/live_tray.py` (pystray tray
+    icon: status, Pause/Resume, Auto gain, Open log, Exit; reconnects every 10 s; single
+    instance via a named mutex; stdout/stderr → `%LOCALAPPDATA%\uhk-ble-live\live.log`;
+    `--hidden-import pystray._win32`, `--collect-data soundcard`; icon from
+    `tools/live_icon.py`).
+  - `dist/uhk-ble-anim.exe` (~28 MB, console) of `tools/ble_anim.py`: a single existing
+    path argument (file dropped on it) = `upload`; no arguments = help; waits for Enter
+    when it owns its console (`GetConsoleProcessList`).
+  - Both use `--collect-submodules winrt`.
+  - CI job `tools` (windows-latest) builds both; the Pages deploy puts them in
+    `download/` next to the web installer (`docs/index.html` "Animation and live spectrum
+    (Windows)" links them), and tags attach them to the release.
+  Exit / Pause cancel the stream: stop packet + GATT service released. A killed tool
+  otherwise keeps the service busy ~20 s (ble_link waits up to ~24 s); the console
+  `ble_live.py` handles closing its window (SetConsoleCtrlHandler). **One tool at a
+  time:** while the live stream holds the service, the others get ACCESS_DENIED
+  (ble_link then says "the adapter is busy"). It must not be shared anyway: during an
+  upload, live packets on DATA would go into the image.
 - Brightness of the standby animation / live spectrum follows the time of day
   (`anim_brightness_now()`): night level (default 30) until 6:00, up to the day level
   (default 180) by 9:00, down again 18:00–22:00, smoothstep in perceived brightness. Clock
@@ -226,7 +249,22 @@ pin (USB port or charger).
   (keys | clicks | mouse distance); slot line +
   "Pair" button (hold 1.5 s = pairing mode, tap during pairing = cancel, countdown shown);
   status lines, log tail. Pop-up cards on the top layer: pairing passkey, UHK Agent "allow
-  config access?". README / Pages screenshots (`docs/img/screen-*.png`) are rendered from
+  config access?", settings menu.
+  - Settings menu (`ui_open_menu()`): a short press of BOOT (released before the 1.5 s
+    hold, not while pairing; a press that woke a dark screen / stopped the animation only
+    wakes it), or a SHORT_CLICKED on the already active slot's pad. Contents:
+    - the active slot's host name + Rename → full-screen lv_keyboard dialog (OK saves,
+      the keyboard key cancels, "" = no name);
+    - the standby animation switch (`AnimSettings::mode`);
+    - day / night brightness sliders (saved on release, `anim_set_settings()`).
+    A tap beside the card, ✕ or BOOT closes it, and it closes by itself after 60 s idle
+    (`SCREEN_DIM_MS`). While it is open no standby animation or live spectrum starts;
+    starting pairing closes it.
+  - Host names: `ble_hid_set_host_name()`, NVS "bleslots" keys n0..n4, at most
+    `BLE_HOST_NAME_MAX` (20) ASCII characters. Shown on the slot line and in "waiting
+    for <name>". Cleared when another host pairs on the slot or on forget-all; a host
+    that moves to another slot takes its name along.
+  README / Pages screenshots (`docs/img/screen-*.png`) are rendered from
   `src/ui.cpp` with LVGL on a PC (also `screen-live` from `src/live.cpp` with canned band
   levels, and `screen-matrix` = a matrix demo frame through uanm encode / decode): `python tools/ui_sim/render.py` (gcc/g++ — TDM-GCC here —
   Pillow, LVGL from .pio/libdeps; objects cached in .pio/ui_sim; scenes + stubbed status

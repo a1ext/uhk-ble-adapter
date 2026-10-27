@@ -86,6 +86,31 @@
     th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--track); }
     th { color: var(--dim); font-weight: 600; }
     footer { margin-top: 40px; color: var(--dim); font-size: 14px; }
+    .downloads { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin: 16px 0; }
+    .downloads .card { padding: 18px 20px; }
+    .downloads h3 { margin: 0 0 4px; }
+    .downloads p { margin: 0 0 14px; color: var(--dim); font-size: 14px; }
+    a.dl {
+      display: inline-block;
+      color: #fff;
+      font-weight: 600;
+      text-decoration: none;
+      background: linear-gradient(90deg, var(--neon), var(--blue));
+      border-radius: 999px;
+      padding: 10px 22px;
+      box-shadow: 0 0 18px rgba(255, 46, 196, .35);
+    }
+    a.dl:hover { box-shadow: 0 0 26px rgba(255, 46, 196, .6); }
+    a.dl:focus-visible { outline: 2px solid var(--neon-hi); outline-offset: 3px; }
+    .size { color: var(--dim); font-size: 13px; margin-left: 10px; }
+    pre {
+      background: var(--track);
+      border-radius: 10px;
+      padding: 10px 14px;
+      overflow-x: auto;
+      margin: 10px 0;
+    }
+    pre code { background: none; padding: 0; }
   </style>
 </head>
 <body>
@@ -131,6 +156,9 @@
     <li>Pick a slot (tap its pad on the right), hold <kbd>BOOT</kbd> until the bar along the bottom fills,
       then pair <b>UHK60 BLE 1…5</b> on the computer or phone within 20 s and type the 6-digit code
       the adapter shows.</li>
+    <li>Settings: a short press of <kbd>BOOT</kbd>, or a tap on the active slot's pad. Give the slot's host a
+      name (it replaces the address on the screen), switch the standby animation on or off, and set its
+      day and night brightness.</li>
   </ul>
   <div class="gallery">
     <figure>
@@ -141,24 +169,128 @@
       <img src="img/screen-agent.png" alt="Pop-up: UHK Agent asks for config access, with Deny and Allow buttons" width="1128" height="536">
       <figcaption>UHK Agent asks before reading or changing the keyboard's config: tap Allow, then retry in Agent.</figcaption>
     </figure>
+    <figure>
+      <img src="img/screen-menu.png" alt="Settings card: the slot's host MacBook Pro with a Rename button, a Standby animation switch, and Day and Night brightness sliders" width="1128" height="536">
+      <figcaption>Settings of the active slot: a short press of BOOT.</figcaption>
+    </figure>
+    <figure>
+      <img src="img/screen-rename.png" alt="On-screen keyboard below a text field with the name MacBook Pro" width="1128" height="536">
+      <figcaption>Naming the slot's host on the on-screen keyboard.</figcaption>
+    </figure>
   </div>
+
+  <h2 id="windows">Animation and live spectrum (Windows)</h2>
+  <p>
+    When it is idle, the adapter can play an animation, or show the spectrum of whatever the PC is
+    playing, streamed live. Both come from the Windows PC paired on the active slot, with two small
+    programs that need no installation and no Python.
+  </p>
+  <div class="gallery">
+    <figure>
+      <img src="img/screen-matrix.png" alt="Standby animation: green digital rain of letters and digits on black" width="1128" height="536">
+      <figcaption>Standby animation (the built-in matrix demo).</figcaption>
+    </figure>
+    <figure>
+      <img src="img/screen-live.png" alt="Live spectrum: 48 bars from pink (bass) through violet to teal (treble), with peak caps and a dim reflection" width="1128" height="536">
+      <figcaption>Live spectrum of the PC's audio.</figcaption>
+    </figure>
+  </div>
+  <div class="downloads">
+    <div class="card">
+      <h3>Live spectrum</h3>
+      <p>Runs as an icon in the notification area, no window.</p>
+      <a class="dl" href="download/uhk-ble-live.exe" download>uhk-ble-live.exe</a><span class="size">~30 MB</span>
+    </div>
+    <div class="card">
+      <h3>Animation uploader</h3>
+      <p>Drop a GIF on it, or use it from a terminal.</p>
+      <a class="dl" href="download/uhk-ble-anim.exe" download>uhk-ble-anim.exe</a><span class="size">~28 MB</span>
+    </div>
+  </div>
+  <p class="dim">
+    Built from the same version as the firmware above, and attached to every
+    <a href="https://github.com/a1ext/uhk-ble-adapter/releases/latest">release</a>. They are not code-signed,
+    so Windows SmartScreen may warn the first time: <b>More info → Run anyway</b>.
+  </p>
+
+  <h3>Before you start</h3>
+  <ul>
+    <li>Windows 10 or 11 with Bluetooth. The PC is paired with the adapter, its slot is the active one, and
+      the keyboard types on it: the programs use Windows' own connection to the adapter.</li>
+    <li>One program at a time: pause or exit the live spectrum before uploading an animation, otherwise
+      the uploader reports that the adapter is busy.</li>
+  </ul>
+
+  <h3>Live spectrum</h3>
+  <ol>
+    <li>Double-click <b>uhk-ble-live.exe</b>. An icon with bars appears in the notification area (maybe in
+      the overflow behind the ^ arrow), and the bars show on the adapter as soon as the PC plays
+      something.</li>
+    <li>The icon's menu shows the status and has <b>Pause / Resume</b> (also a left click), <b>Auto gain</b>
+      (quiet music still fills the bars), <b>Open log</b> and <b>Exit</b>.</li>
+    <li>The icon turns grey while the adapter is out of reach or another slot is active. The program tries
+      again every 10 s, so it can stay running.</li>
+    <li>A touch on the adapter shows its normal screen; the spectrum comes back after 30 s.</li>
+    <li>To start it with Windows: <kbd>Win</kbd>+<kbd>R</kbd>, type <code>shell:startup</code>, and put a
+      shortcut to the program into the folder that opens.</li>
+  </ol>
+  <p class="dim">
+    It captures what the PC plays on its default output device, runs the FFT on the PC and sends only the
+    band levels: about 50 bytes, 60 times a second. The keyboard's own traffic is not affected.
+  </p>
+
+  <h3>Standby animation</h3>
+  <ol>
+    <li>Drag a <b>GIF</b> or <b>WebP</b> file, or a folder of PNG frames, onto <b>uhk-ble-anim.exe</b>. A
+      window shows the upload. It takes a few seconds (~45 KB/s), and the keyboard keeps working.</li>
+    <li>The animation plays after 60 s without a touch, until the next touch or <kbd>BOOT</kbd> press.
+      Typing does not stop it. After 30 minutes the screen goes dark (AMOLED burn-in).</li>
+    <li>Pictures are fitted to the 536 × 240 screen and stored at half resolution with doubled pixels;
+      the adapter has 3.4 MB for the animation.</li>
+  </ol>
+  <p>More from a terminal (<kbd>Win</kbd>+<kbd>R</kbd> → <code>cmd</code>, then <code>cd</code> to the
+    program's folder):</p>
+  <pre><code>uhk-ble-anim.exe upload demo:matrix              the built-in matrix rain
+uhk-ble-anim.exe preview my.gif -o check.gif     how the adapter will show it
+uhk-ble-anim.exe play                            show it now (also: stop)
+uhk-ble-anim.exe info                            what is stored, settings, clock
+uhk-ble-anim.exe set --delay 120 --off-after 3600</code></pre>
+  <p class="dim">
+    Brightness follows the time of day: the night level until 6:00, the day level from 9:00 to 18:00,
+    dimming down until 22:00. Set both in the adapter's settings (a short press of <kbd>BOOT</kbd>) or with
+    <code>uhk-ble-anim.exe set --brightness 200 --night 20</code>. The adapter's clock keeps time without
+    power and is set from the PC whenever one of the programs connects.
+  </p>
 
   <h2 id="build">Build the adapter</h2>
   <p>
     The adapter is just the board and a 5 V supply: <b>+5 V on the board's VBUS pin</b>, and the keyboard
     plugged into its USB-C port. The USB-C port's VBUS is on the same net as the VBUS pin, so the
-    keyboard is powered from there too.
+    keyboard is powered from there too. The simplest way is a small power board that plugs onto the
+    header pins; wiring it by hand works just as well.
   </p>
 
-  <h3>Parts</h3>
-  <ul>
-    <li>LilyGo <b>T-Display-S3 AMOLED Plus</b>.</li>
-    <li>A 5 V input: a USB 2.0 <b>USB-C receptacle</b> (for example GCT USB4085-GF-A) with two 5.1 kΩ
-      resistors, so any USB port or charger can power the adapter. Any other 5 V source works too.</li>
-    <li>A resettable fuse (polyfuse) of about 1 A and a 100–220 µF capacitor (10 V or more).</li>
-    <li>For an enclosure (optional): a panel USB-C receptacle for the keyboard, a <b>USB-C plug breakout</b>
-      that goes into the board's port, and two 56 kΩ resistors.</li>
-  </ul>
+  <h3>Power board</h3>
+  <figure>
+    <img src="img/power-board.svg" alt="Power board circuit: a USB-C power input with 5.1 kilo-ohm resistors on CC1 and CC2 and 15 kilo-ohm on D+ and D-, a 1.1 A resettable fuse, 47, 10 and 1 microfarad and 100 nanofarad capacitors, into LilyGo pins 11 to 14 of both rows: left GND, VBUS, VBUS; right GND. Back view: the board lies across the back of the case near the USB-C end, its power USB-C on a tab beyond the VBUS side; the keyboard plugs into the LilyGo's own USB-C." width="760" height="580">
+  </figure>
+  <ol>
+    <li><b>Order it.</b> 2 layers, 17.4 × 45 mm, all parts assembled on one side. The
+      <a href="https://github.com/a1ext/uhk-ble-adapter/tree/master/doughter_board/production">gerber, BOM and
+      placement files</a> are ready for JLCPCB, with LCSC part numbers.</li>
+    <li><b>Pins.</b> Solder two 1×4 male pin headers (2.54 mm) in from the component side, slide their plastic
+      strips off, and cut the pins to 2.3 mm on the component side and at most 0.8 mm on the other.</li>
+    <li><b>Fit.</b> Plug it into pins 11–14 of both header rows (the four pins nearest the USB-C end),
+      component side towards the case, with the power USB-C tab sticking out on the VBUS side.</li>
+    <li><b>Shell</b> (optional). A 3D-printed lid and tray cover the power board and hold it with the case's
+      own screws: <a href="https://github.com/a1ext/uhk-ble-adapter/tree/master/doughter_board/shell">STL, STEP
+      and printing notes</a> (PETG or PLA, no supports, M1.2 screws).</li>
+    <li>Plug the keyboard into the LilyGo's USB-C, and a USB charger or port into the power board.</li>
+  </ol>
+  <figure>
+    <img src="img/shell.jpg" alt="3D render: the LilyGo case with the printed lid on its back and the tab that holds the power USB-C" width="900" height="675">
+    <figcaption>The printed shell on the back of the LilyGo case (render).</figcaption>
+  </figure>
 
   <h3>Header pins</h3>
   <figure>
@@ -168,19 +300,21 @@
   <table>
     <tr><th>Pin</th><th>Connect to</th></tr>
     <tr><td><b>VBUS</b> (left, either of the two)</td><td>+5 V, after the fuse</td></tr>
-    <tr><td><b>GND</b></td><td>ground of the 5 V supply (and of the keyboard panel jack, if you use one)</td></tr>
+    <tr><td><b>GND</b></td><td>ground of the 5 V supply</td></tr>
     <tr><td><b>USB-C port</b></td><td>the keyboard: its cable directly, or the plug breakout of a panel jack</td></tr>
-    <tr><td><b>BOOT</b> button</td><td>nothing to wire: it's the pairing button (hold 1.5 s), and held at power-up it starts the bootloader for flashing</td></tr>
+    <tr><td><b>BOOT</b> button</td><td>nothing to wire: hold 1.5 s to pair, a short press opens the settings, and held at power-up it starts the bootloader for flashing</td></tr>
   </table>
   <p class="dim">
     Leave the other pins alone: GPIO1–3, 11–15 and 21 are used by the PMU, touch, RTC and SD card on the board.
   </p>
 
-  <h3>Wiring</h3>
+  <h3>Hand-wired instead</h3>
   <figure>
     <img src="img/wiring.svg" alt="Wiring diagram: a USB-C power jack with 5.1 kilo-ohm resistors on CC1 and CC2 feeds +5 V through a polyfuse into the board's VBUS pin, with a capacitor across +5 V and GND; the keyboard plugs into the board's USB-C port." width="760" height="400">
   </figure>
   <ol>
+    <li><b>Parts.</b> A USB 2.0 USB-C receptacle with two 5.1 kΩ resistors (or any other 5 V source), a
+      resettable fuse (polyfuse) of about 1 A, and a 100–220 µF capacitor (10 V or more).</li>
     <li><b>Power.</b> Run the input's +5 V through the polyfuse to one of the board's <b>VBUS</b> pins, and its ground to
       a <b>GND</b> pin. Put the 100–220 µF capacitor across +5 V and GND close to the board. On a USB-C input
       jack, connect a 5.1 kΩ resistor from CC1 to GND and another from CC2 to GND, so chargers and USB-C to
@@ -192,7 +326,8 @@
   </ol>
   <p class="warn">
     The board's USB-C VBUS and its VBUS pins are the same net. Never plug the board's USB-C into a computer
-    while +5 V is on the VBUS pin: that connects two 5 V supplies to each other. To flash the board by cable,
+    while +5 V is on the VBUS pin, from the power board or hand-wired: that connects two 5 V supplies to each
+    other. To flash the board by cable,
     disconnect the 5 V supply and the keyboard first (then hold <kbd>BOOT</kbd> while you plug it in), or update it
     over Bluetooth.
   </p>
@@ -204,7 +339,8 @@
   <h2>Updates</h2>
   <p>
     Later versions can also be installed over Bluetooth from Windows, without touching the cable:
-    <code>pio run -t ota</code> in the project. See the project README for details.
+    <code>pio run -t ota</code> in the project (pause the live spectrum first). See the project README for
+    details.
   </p>
 
   <footer>

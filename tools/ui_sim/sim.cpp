@@ -5,6 +5,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include "anim.h"
 #include "ble_hid.h"
 #include "bridge.h"
 #include "config.h"
@@ -25,6 +26,11 @@ static OtaStatus ota;
 static const char *logText = "";
 
 void ble_hid_get_status(BleHidStatus &st) { st = ble; }
+void ble_hid_set_host_name(uint8_t slot, const char *name) { strcpy(ble.slotName[slot], name); }
+static AnimSettings animSettings = {ANIM_MODE_STANDBY, 60, 180, 1800, 30};
+const AnimSettings &anim_settings() { return animSettings; }
+void anim_set_settings(const AnimSettings &s) { animSettings = s; }
+bool anim_available() { return true; }
 void bridge_get_status(BridgeStatus &st) { st = br; }
 void ota_get_status(OtaStatus &st) { st = ota; }
 // 48 213 keys, 6 702 clicks, 1.20 km of mouse
@@ -150,9 +156,11 @@ int main()
     ble.mtu = 185;
     ble.interval = 6;
     ble.slot = 2;
+    static const char *names[] = {"Work PC", "Pixel 8", "MacBook Pro"};
     for (int s = 0; s < 3; s++) {
         ble.slotUsed[s] = true;
         memcpy(ble.slotHost[s], hosts[s], 6);
+        strcpy(ble.slotName[s], names[s]);
     }
     br.usbConnected = true;
     strcpy(br.usbProduct, "UHK 60 v2");
@@ -173,7 +181,7 @@ int main()
 
     // Tap slot 5: the spark runs down the bus, then the pad lights up
     lv_obj_t *strip = lv_obj_get_child(lv_scr_act(), 1);
-    lv_event_send(lv_obj_get_child(strip, 4), LV_EVENT_CLICKED, nullptr);
+    lv_event_send(lv_obj_get_child(strip, 4), LV_EVENT_SHORT_CLICKED, nullptr);
     run(160);
     shot("anim-spark");
     run(260);
@@ -212,6 +220,20 @@ int main()
     ui_update(nullptr);
     run(1500);
     shot("screen-agent");
+
+    // Settings menu of slot 3 (a tap on its pad), then its rename keyboard
+    br.agentAsking = false;
+    ui_update(nullptr);
+    lv_event_send(lv_obj_get_child(strip, 2), LV_EVENT_SHORT_CLICKED, nullptr);
+    ui_update(nullptr);
+    run(500);
+    shot("screen-menu");
+    lv_obj_t *card = lv_obj_get_child(lv_obj_get_child(lv_layer_top(), 1), 0);
+    lv_obj_t *rename = lv_obj_get_child(lv_obj_get_child(card, 1), 1);
+    lv_event_send(rename, LV_EVENT_CLICKED, nullptr);
+    run(300);
+    shot("screen-rename");
+    ui_close_menu();
 
     // Live spectrum: a second of music at 60 fps, the shot ~0.2 s after a kick,
     // so the peak caps float above the falling bars

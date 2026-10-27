@@ -25,7 +25,7 @@ from PIL import Image, ImageDraw
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 W, H = 536, 240
-SCREENSHOTS = ["screen-bt", "screen-passkey", "screen-agent", "screen-live"]
+SCREENSHOTS = ["screen-bt", "screen-passkey", "screen-agent", "screen-menu", "screen-rename", "screen-live"]
 FRAMES = ["anim-spark", "anim-pop"]
 
 

@@ -1,0 +1,130 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 580" role="img" aria-labelledby="t d">
+  <title id="t">Power board</title>
+  <desc id="d">The power board: a USB-C power input with 5.1 kilo-ohm resistors from CC1 and CC2 to ground and 15 kilo-ohm resistors from D+ and D- to ground, a 1.1 A resettable fuse, 47, 10 and 1 microfarad and 100 nanofarad capacitors, and two 1x4 pin headers that plug into pins 11 to 14 of both LilyGo headers: left pin 11 ground, pins 12 and 13 VBUS, right pin 11 ground, the other pins only for grip. Back view: the board lies across the back of the LilyGo case near its USB-C end, the power USB-C on a tab beyond the VBUS side, facing away; the keyboard plugs into the LilyGo's own USB-C.</desc>
+  <style>
+    text { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; fill: #e8e8ec; }
+    .h { font-size: 15px; font-weight: 600; }
+    .s { font-size: 12.5px; fill: #a1a1a6; }
+    .l { font-size: 12.5px; }
+    .pin { font-size: 11.5px; font-weight: 600; text-anchor: middle; dominant-baseline: central; }
+    .box { fill: #141418; stroke: #3a3a3c; stroke-width: 1.5; }
+    .pwr { stroke: #ff453a; stroke-width: 3; fill: none; stroke-linejoin: round; }
+    .gnd { stroke: #8e8e93; stroke-width: 3; fill: none; stroke-linejoin: round; }
+    .usb { stroke: #ff2ec4; stroke-width: 3; fill: none; stroke-linejoin: round; }
+    .cap { stroke-width: 2.5; }
+  </style>
+  <rect width="760" height="580" rx="22" fill="#0b0b0d"/>
+
+  <!-- ===================== circuit ===================== -->
+  <text x="30" y="38" class="h" style="fill:#ff9be6">Circuit</text>
+
+  <!-- USB-C input -->
+  <rect class="box" x="30" y="56" width="200" height="164" rx="12"/>
+  <text x="46" y="82" class="h">USB-C power in</text>
+  <text x="46" y="102" class="s">any USB port or charger</text>
+  <text x="46" y="130" class="l">CC1, CC2: 5.1 kΩ to GND</text>
+  <text x="46" y="146" class="s">asks for 5 V (also C-to-C cables)</text>
+  <text x="46" y="174" class="l">D+, D−: 15 kΩ to GND</text>
+  <text x="46" y="190" class="s">a PC sees no USB device</text>
+  <text x="216" y="96" class="l" text-anchor="end" style="fill:#ff8a80">VBUS</text>
+  <text x="216" y="208" class="l" text-anchor="end">GND</text>
+
+  <!-- +5 V rail through the fuse -->
+  <path class="pwr" d="M230 92 H262 M310 92 H560"/>
+  <rect x="262" y="80" width="48" height="24" rx="4" fill="#0b0b0d" stroke="#ff453a" stroke-width="2"/>
+  <text x="286" y="72" class="s" text-anchor="middle">PTC fuse 1.1 A</text>
+  <text x="536" y="82" class="l" text-anchor="end" style="fill:#ff8a80; font-weight:600">+5 V</text>
+  <!-- GND rail -->
+  <path class="gnd" d="M230 204 H560"/>
+  <text x="536" y="196" class="l" text-anchor="end">GND</text>
+
+  <!-- capacitors across the rails -->
+  <g class="cap">
+    <line x1="350" y1="92" x2="350" y2="140" stroke="#ff453a"/><line x1="336" y1="140" x2="364" y2="140" stroke="#ff453a"/>
+    <line x1="336" y1="148" x2="364" y2="148" stroke="#8e8e93"/><line x1="350" y1="148" x2="350" y2="204" stroke="#8e8e93"/>
+    <line x1="400" y1="92" x2="400" y2="140" stroke="#ff453a"/><line x1="386" y1="140" x2="414" y2="140" stroke="#ff453a"/>
+    <line x1="386" y1="148" x2="414" y2="148" stroke="#8e8e93"/><line x1="400" y1="148" x2="400" y2="204" stroke="#8e8e93"/>
+    <line x1="450" y1="92" x2="450" y2="140" stroke="#ff453a"/><line x1="436" y1="140" x2="464" y2="140" stroke="#ff453a"/>
+    <line x1="436" y1="148" x2="464" y2="148" stroke="#8e8e93"/><line x1="450" y1="148" x2="450" y2="204" stroke="#8e8e93"/>
+    <line x1="500" y1="92" x2="500" y2="140" stroke="#ff453a"/><line x1="486" y1="140" x2="514" y2="140" stroke="#ff453a"/>
+    <line x1="486" y1="148" x2="514" y2="148" stroke="#8e8e93"/><line x1="500" y1="148" x2="500" y2="204" stroke="#8e8e93"/>
+  </g>
+  <text x="350" y="172" class="s" text-anchor="middle" dx="-22">47µ</text>
+  <text x="400" y="172" class="s" text-anchor="middle" dx="-20">10µ</text>
+  <text x="450" y="172" class="s" text-anchor="middle" dx="-16">1µ</text>
+  <text x="500" y="172" class="s" text-anchor="middle" dx="-22">100n</text>
+  <circle cx="350" cy="92" r="3.5" fill="#ff453a"/><circle cx="400" cy="92" r="3.5" fill="#ff453a"/>
+  <circle cx="450" cy="92" r="3.5" fill="#ff453a"/><circle cx="500" cy="92" r="3.5" fill="#ff453a"/>
+  <circle cx="350" cy="204" r="3.5" fill="#8e8e93"/><circle cx="400" cy="204" r="3.5" fill="#8e8e93"/>
+  <circle cx="450" cy="204" r="3.5" fill="#8e8e93"/><circle cx="500" cy="204" r="3.5" fill="#8e8e93"/>
+
+  <!-- headers -->
+  <rect class="box" x="560" y="56" width="170" height="164" rx="12" style="stroke:#ff2ec4; stroke-opacity:.5"/>
+  <text x="645" y="80" class="h" text-anchor="middle">LilyGo pins 11–14</text>
+  <text x="608" y="102" class="s" text-anchor="middle">left row</text>
+  <text x="684" y="102" class="s" text-anchor="middle">right row</text>
+  <g>
+    <rect x="584" y="112" width="48" height="22" rx="6" fill="#8e8e93" fill-opacity=".2" stroke="#8e8e93"/><text x="608" y="123" class="pin">GND</text>
+    <rect x="584" y="138" width="48" height="22" rx="6" fill="#ff453a" fill-opacity=".22" stroke="#ff453a"/><text x="608" y="149" class="pin">VBUS</text>
+    <rect x="584" y="164" width="48" height="22" rx="6" fill="#ff453a" fill-opacity=".22" stroke="#ff453a"/><text x="608" y="175" class="pin">VBUS</text>
+    <rect x="584" y="190" width="48" height="22" rx="6" fill="#1c1c1e"/><text x="608" y="201" class="pin" style="fill:#6e6e73">16</text>
+    <rect x="660" y="112" width="48" height="22" rx="6" fill="#8e8e93" fill-opacity=".2" stroke="#8e8e93"/><text x="684" y="123" class="pin">GND</text>
+    <rect x="660" y="138" width="48" height="22" rx="6" fill="#1c1c1e"/><text x="684" y="149" class="pin" style="fill:#6e6e73">3V3</text>
+    <rect x="660" y="164" width="48" height="22" rx="6" fill="#1c1c1e"/><text x="684" y="175" class="pin" style="fill:#6e6e73">VBAT</text>
+    <rect x="660" y="190" width="48" height="22" rx="6" fill="#1c1c1e"/><text x="684" y="201" class="pin" style="fill:#6e6e73">39</text>
+  </g>
+  <text x="30" y="244" class="s">Grey pins are not connected: they only hold the board in place. The battery connector stays empty.</text>
+
+  <!-- ===================== placement, back view ===================== -->
+  <text x="30" y="290" class="h" style="fill:#ff9be6">On the LilyGo (back view)</text>
+
+  <!-- LilyGo case: 27.5 x 56.5 mm at 4.4 px/mm, USB-C at the bottom -->
+  <rect x="290" y="300" width="121" height="249" rx="20" fill="#141418" stroke="#2c2c30" stroke-width="2"/>
+  <text x="350" y="330" class="s" text-anchor="middle">LilyGo</text>
+  <text x="350" y="346" class="s" text-anchor="middle">screen down</text>
+  <g transform="translate(0 -18)">
+  <!-- header rows (22.86 mm apart), pins 1..14 -->
+  <g fill="#3a3a3c">
+    <circle cx="300" cy="352" r="2.5"/><circle cx="300" cy="363" r="2.5"/><circle cx="300" cy="374" r="2.5"/><circle cx="300" cy="386" r="2.5"/>
+    <circle cx="300" cy="397" r="2.5"/><circle cx="300" cy="408" r="2.5"/><circle cx="300" cy="419" r="2.5"/><circle cx="300" cy="430" r="2.5"/>
+    <circle cx="300" cy="441" r="2.5"/><circle cx="300" cy="453" r="2.5"/>
+    <circle cx="401" cy="352" r="2.5"/><circle cx="401" cy="363" r="2.5"/><circle cx="401" cy="374" r="2.5"/><circle cx="401" cy="386" r="2.5"/>
+    <circle cx="401" cy="397" r="2.5"/><circle cx="401" cy="408" r="2.5"/><circle cx="401" cy="419" r="2.5"/><circle cx="401" cy="430" r="2.5"/>
+    <circle cx="401" cy="441" r="2.5"/><circle cx="401" cy="453" r="2.5"/>
+  </g>
+  </g>
+  <!-- LilyGo USB-C: the keyboard -->
+  <rect x="335" y="541" width="31" height="14" rx="5" fill="#2c2c30" stroke="#48484a"/>
+
+  <g transform="translate(0 -18)">
+  <!-- power board: 45 x 17.4 mm, across the case over pins 11..14, tab beyond the VBUS side -->
+  <rect x="211" y="425" width="198" height="77" rx="5" fill="#1d0f1a" fill-opacity=".92" stroke="#ff2ec4" stroke-width="2"/>
+  <g>
+    <circle cx="300" cy="464" r="4" fill="#8e8e93"/><circle cx="300" cy="475" r="4" fill="#ff453a"/>
+    <circle cx="300" cy="486" r="4" fill="#ff453a"/><circle cx="300" cy="497" r="4" fill="#48484a"/>
+    <circle cx="401" cy="464" r="4" fill="#8e8e93"/><circle cx="401" cy="475" r="4" fill="#48484a"/>
+    <circle cx="401" cy="486" r="4" fill="#48484a"/><circle cx="401" cy="497" r="4" fill="#48484a"/>
+  </g>
+  <!-- its USB-C, facing away from the LilyGo -->
+  <rect x="203" y="447" width="22" height="34" rx="6" fill="#2c2c30" stroke="#ff453a" stroke-width="1.5"/>
+  <text x="331" y="448" class="s" text-anchor="middle" style="fill:#ff9be6">power board</text>
+  <path class="pwr" d="M203 464 H150"/>
+  <text x="144" y="460" class="l" text-anchor="end" style="fill:#ff8a80; font-weight:600">5 V in</text>
+  <text x="144" y="477" class="s" text-anchor="end">USB charger / port</text>
+
+  </g>
+  <path class="usb" d="M366 548 H470"/>
+  <text x="478" y="544" class="l" style="fill:#ff9be6; font-weight:600">Keyboard</text>
+  <text x="478" y="560" class="s" dy="-2">into the LilyGo's USB-C</text>
+
+  <!-- notes -->
+  <text x="456" y="330" class="l">• Lies component side down on the case back:</text>
+  <text x="468" y="348" class="s">pins into the header sockets, cut to 2.3 mm,</text>
+  <text x="468" y="364" class="s">header plastic removed.</text>
+  <text x="456" y="392" class="l">• Fuse, capacitors and USB-C sit on the tab</text>
+  <text x="468" y="410" class="s">beyond the VBUS-side wall, under the shell.</text>
+  <text x="456" y="438" class="l">• BOOT and Reset stay reachable.</text>
+  <text x="456" y="472" class="l" style="fill:#ff9be6">Never plug the LilyGo's USB-C into a PC</text>
+  <text x="456" y="490" class="s">while the power board is powered: both feed</text>
+  <text x="456" y="506" class="s">the same VBUS.</text>
+</svg>

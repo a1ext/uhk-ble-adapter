@@ -107,6 +107,7 @@ def capture(args, out: Latest, stop: threading.Event):
     an = Analyzer(args.samplerate, args.fft, args.bands, args.fmin, args.fmax,
                   args.floor, args.ceil, args.tilt, args.gate, args.agc)
     roll = Rolling(args.fft)
+    args.analyzer = an                  # the tray app toggles an.agc while it runs
     print(f"loopback: {spk.name} @ {args.samplerate} Hz | window {args.fft} "
           f"({1000 * args.fft / args.samplerate:.0f} ms) | {args.bands} bands @ {args.fps:.0f} fps")
     while not stop.is_set():
@@ -134,14 +135,19 @@ def sweep(args, out: Latest, stop: threading.Event):
         time.sleep(1 / args.fps)
 
 
-async def run(args):
+async def run(args, on_state=None):
+    """Streams until cancelled. on_state(kind, value): ("connected", device name),
+    ("fps", frames per second every 5 s). Raises ConnectionError when the adapter
+    stops taking packets (another slot selected, out of range)."""
     from ble_link import Link
     lk = await Link().connect(args.name)
+    if on_state:
+        on_state("connected", lk.device.name)
     latest = Latest(asyncio.get_running_loop())
     stop = threading.Event()
     threading.Thread(target=sweep if args.test else capture, args=(args, latest, stop), daemon=True).start()
     head = b"LV" + bytes([0x01, args.brightness])
-    sent, t0 = 0, time.time()
+    sent, t0, fails = 0, time.time(), 0
     try:
         while True:
             # the adapter ends the stream after 1.5 s without packets: keep sending in silence
@@ -149,18 +155,61 @@ async def run(args):
                 frame = await asyncio.wait_for(latest.get(), 0.5)
             except asyncio.TimeoutError:
                 frame = bytes(args.bands)
-            if not await lk.send_live(head + frame):
-                print("write failed", file=sys.stderr)
+            if await lk.send_live(head + frame):
+                fails = 0
+            else:
+                fails += 1
+                if fails == 1:
+                    print("write failed", file=sys.stderr)
+                if fails > 120:
+                    raise ConnectionError("the adapter stopped taking packets")
             sent += 1
-            if args.stats and time.time() - t0 >= 5:
-                print(f"{sent / (time.time() - t0):.1f} frames/s sent")
+            if time.time() - t0 >= 5:
+                fps = sent / (time.time() - t0)
+                if args.stats:
+                    print(f"{fps:.1f} frames/s sent")
+                if on_state:
+                    on_state("fps", fps)
                 sent, t0 = 0, time.time()
     finally:
         stop.set()
-        await lk.send_live(b"LV\x00")   # stream over: the normal screen comes back
+        try:
+            await lk.send_live(b"LV\x00")   # stream over: the normal screen comes back
+        except OSError:
+            pass                            # the link is already gone
+        lk.close()                          # an open service blocks the next start for ~20 s
 
 
-def main():
+def on_console_close(loop, task):
+    """Closing the console window kills the process ~5 s later: cancel the stream
+    meanwhile, so the adapter gets its stop packet and the service is released."""
+    import ctypes
+    done = threading.Event()
+
+    @ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_uint)
+    def handler(event):
+        if event in (2, 5, 6):          # CTRL_CLOSE / LOGOFF / SHUTDOWN
+            loop.call_soon_threadsafe(task.cancel)
+            done.wait(3)
+            return 1
+        return 0                        # Ctrl-C / Ctrl-Break: Python's own handling
+
+    ctypes.windll.kernel32.SetConsoleCtrlHandler(handler, True)
+    return handler, done                # the caller keeps the callback alive
+
+
+async def amain(args):
+    keep = on_console_close(asyncio.get_running_loop(), asyncio.current_task()) if os.name == "nt" else None
+    try:
+        await run(args)
+    except asyncio.CancelledError:
+        pass
+    finally:
+        if keep:
+            keep[1].set()
+
+
+def parse_args(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--name", default="UHK60 BLE", help="device name prefix")
     ap.add_argument("--list", action="store_true", help="list speakers and exit")
@@ -180,17 +229,21 @@ def main():
     ap.add_argument("--brightness", type=int, default=0,
                     help="1-255 fixed, 0 = by the time of day (ble_anim.py set --brightness / --night)")
     ap.add_argument("--stats", action="store_true", help="print the frame rate")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     args.bands = max(8, min(64, args.bands))
     args.brightness = max(0, min(255, args.brightness))
+    return args
 
+
+def main(argv=None):
+    args = parse_args(argv)
     if args.list:
         import soundcard as sc
         for s in sc.all_speakers():
             print(f"  {s.name}")
         return
     try:
-        asyncio.run(run(args))
+        asyncio.run(amain(args))
     except KeyboardInterrupt:
         pass
 

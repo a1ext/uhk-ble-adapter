@@ -5,3 +5,5 @@ __pycache__/
 doughter_board/History/
 doughter_board/__Previews/
 *.DsnWrk
+.venv-build/
+dist/

@@ -69,8 +69,19 @@ LilyGo T-Display-S3 AMOLED Plus. Hardware and firmware details are in
 
 Both are controlled from the PC that is paired on the active slot, over the same
 encrypted Bluetooth link as the keyboard. The tools run on **Windows** for now
-(see [Linux and macOS](#linux-and-macos)) and need Python with
-`pip install bleak numpy pillow`, plus `soundcard` for the live spectrum.
+(see [Linux and macOS](#linux-and-macos)).
+
+**Without Python:** download `uhk-ble-live.exe` and `uhk-ble-anim.exe` from the
+[project page](https://a1ext.github.io/uhk-ble-adapter/#windows), which has
+step-by-step instructions, or from a release. CI builds them from the same
+commit as the firmware.
+
+**From the sources:** Python with `pip install bleak numpy pillow`, plus
+`soundcard` for the live spectrum.
+
+Only one tool can use the adapter at a time. Pause the live spectrum before an
+upload or a firmware update, otherwise the tool reports that the adapter is
+busy (an upload would also mix live packets into the file).
 
 ### Standby animation
 
@@ -92,12 +103,33 @@ python tools/ble_anim.py info                 # what is stored, settings, the ad
   what the adapter will play.
 - Settings (unset options keep their value):
   `python tools/ble_anim.py set --delay 120 --off-after 3600 --mode off`.
+  The on/off switch and the day / night brightness are also in the
+  adapter's settings menu (a short press of BOOT).
+- `uhk-ble-anim.exe` takes the same commands. A GIF / WebP file or a folder
+  dropped on it is uploaded. Started without a terminal, it waits for Enter
+  before its window closes.
 
 ### Live spectrum
 
 ```bash
 python tools/ble_live.py --agc
 ```
+
+Or without Python on the PC: **`uhk-ble-live.exe`**, a single file that runs as
+a tray icon, with no console window.
+- Double-click it to start; auto-gain is on.
+- The icon's menu shows the status and has Pause / Resume (also a left
+  click), Auto gain, Open log and Exit.
+- The icon is grey while no adapter is reachable (another slot selected,
+  switched off). The app keeps reconnecting every 10 s.
+- Command-line options are the same as for `ble_live.py`. The log is at
+  `%LOCALAPPDATA%\uhk-ble-live\live.log`.
+
+Build both executables with `python tools/build_exe.py` (or `... live` /
+`... anim`). The Python that runs it needs only Pillow: the script sets up
+its own `.venv-build` with PyInstaller, bleak, soundcard, numpy and pystray,
+and writes `dist/uhk-ble-live.exe` (~30 MB) and `dist/uhk-ble-anim.exe`
+(~28 MB).
 
 - Captures what the PC plays (WASAPI loopback), runs the FFT on the PC and
   sends only the band levels: about 50 bytes per frame, 60 frames/s. The
@@ -151,6 +183,19 @@ as the VBUS pin, so the keyboard gets its power from there. Step-by-step
 instructions and a parts list are on the
 [project page](https://a1ext.github.io/uhk-ble-adapter/#build).
 
+**Power board** (the easy way): a 17.4 × 45 mm board that plugs onto pins
+11–14 of both headers. It has a USB-C sink, a 1.1 A PTC fuse and capacitors;
+left pin 11 is GND, pins 12–13 are VBUS, right pin 11 is GND, and the other
+pins only hold it in place. JLCPCB files are in
+[doughter_board/production](doughter_board/production), and a 3D-printed
+shell is in [doughter_board/shell](doughter_board/shell).
+
+<p align="center">
+  <img src="docs/img/power-board.svg" width="600" alt="Power board circuit and how it sits across the back of the LilyGo case near the USB-C end, its power USB-C on a tab beyond the VBUS side">
+</p>
+
+Or wire it by hand:
+
 <p align="center">
   <img src="docs/img/pinout.svg" width="600" alt="Header pins of the T-Display-S3 AMOLED Plus, back view. Used: VBUS (+5 V in) and GND. The BOOT button is the pairing button.">
 </p>
@@ -160,7 +205,7 @@ instructions and a parts list are on the
 | **VBUS** (left header, either of the two) | +5 V, through a ~1 A polyfuse |
 | **GND** | ground of the 5 V supply |
 | **USB-C port** | the keyboard: its cable directly, or a panel jack through a USB-C plug breakout |
-| **BOOT** button | nothing to wire: the pairing button (hold 1.5 s); held at power-up it starts the bootloader |
+| **BOOT** button | nothing to wire: hold 1.5 s = pair, short press = settings; held at power-up it starts the bootloader |
 
 <p align="center">
   <img src="docs/img/wiring.svg" width="600" alt="Wiring: a USB-C power jack with 5.1 kilo-ohm resistors on CC1 and CC2 feeds +5 V through a polyfuse into the board's VBUS pin, with a 100-220 microfarad capacitor across +5 V and GND; the keyboard plugs into the board's USB-C port.">

@@ -140,7 +140,19 @@ async def cmd_set(args):
           f"night {night}, off after {off} s")
 
 
-def main():
+def own_console():
+    """Started by a double-click / a file dropped on the .exe: the console window
+    closes with the program, so it waits for Enter."""
+    if os.name != "nt" or not getattr(sys, "frozen", False):
+        return False
+    import ctypes
+    return ctypes.windll.kernel32.GetConsoleProcessList((ctypes.c_uint * 2)(), 2) == 1
+
+
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    if getattr(sys, "frozen", False) and len(argv) == 1 and os.path.exists(argv[0]):
+        argv = ["upload", argv[0]]   # uhk-ble-anim.exe: a GIF / folder dropped on it
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--name", default="UHK60 BLE", help="device name prefix")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -170,7 +182,12 @@ def main():
     p.add_argument("--brightness", type=int, help="1-255 by day (9:00-18:00) while it plays")
     p.add_argument("--night", type=int, help="1-255 at night (22:00-6:00); ramps in between")
     p.add_argument("--off-after", type=int, help="screen off after this many seconds of animation, 0 = never")
-    args = ap.parse_args()
+    if not argv:
+        ap.print_help()
+        print("\nTo upload an animation, drop a GIF / WebP file or a folder of PNGs on this program,"
+              "\nor run e.g.:  upload demo:matrix   |   play   |   stop   |   info")
+        return
+    args = ap.parse_args(argv)
 
     if args.cmd == "make":
         cmd_make(args)
@@ -182,4 +199,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        if own_console():
+            input("\nPress Enter to close...")

@@ -66,18 +66,21 @@ class Link:
             sys.exit(f"no paired device named '{name_prefix}*' - pair the adapter first")
         dev = devices[0]
         print(f"device: {dev.name} ({'connected' if dev.connection_status == 1 else 'not connected'})")
-        self.device, self.service = dev, None
+        self.device, self.service, self.busy = dev, None, False
         atexit.register(self.close)
         self.session = await GattSession.from_device_id_async(dev.bluetooth_device_id)
         self.session.maintain_connection = True
         # right after another process' session Windows answers ACCESS_DENIED for a moment, and
         # while it re-reads the services after a firmware change a call may even throw: retry
-        for attempt in range(6):
+        for attempt in range(13):        # a killed tool's service stays busy up to ~20 s
+            if attempt == 2:
+                print("waiting for Windows to release the adapter's service...")
             if attempt:
-                await asyncio.sleep(1)
+                await asyncio.sleep(2)
             try:
                 res = await dev.get_gatt_services_for_uuid_with_cache_mode_async(SERVICE, BluetoothCacheMode.UNCACHED)
                 if res.status != GattCommunicationStatus.SUCCESS or not res.services:
+                    self.busy |= res.status == GattCommunicationStatus.ACCESS_DENIED
                     what = f"OTA service not found (status {res.status})"
                     continue
                 self.close_service()
@@ -93,6 +96,9 @@ class Link:
                 continue
             break
         else:
+            if self.busy:
+                sys.exit("the adapter is busy: another program is using it (the live spectrum, "
+                         "uhk-ble-live.exe / ble_live.py?) - pause or close it, then try again")
             sys.exit(what + " - adapter firmware without OTA, or Windows cached an old service "
                      "list: remove and re-pair the adapter")
         self.ctrl, self.data = chars[CTRL], chars[DATA]
@@ -127,6 +133,7 @@ class Link:
                 continue
             if cr.status == GattCommunicationStatus.SUCCESS and cr.characteristics:
                 return cr.characteristics[0]
+            self.busy |= cr.status == GattCommunicationStatus.ACCESS_DENIED   # another process has it
         raise LookupError(f"OTA characteristic {u} not found")
 
     def close_service(self):
