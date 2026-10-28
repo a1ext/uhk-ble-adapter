@@ -5,10 +5,14 @@
 #include "anim.h"
 #include "ble_hid.h"
 #include "bridge.h"
+#include "cal.h"
 #include "config.h"
+#include "display.h"
 #include "log.h"
 #include "ota.h"
+#include "overlay.h"
 #include "stats.h"
+#include "sysmon.h"
 
 static const uint32_t COLOR_BT     = 0x0A84FF; // iOS blue
 static const uint32_t COLOR_TEXT   = 0xE0E0E0;
@@ -40,7 +44,7 @@ static const uint32_t   SLOT_ANIM_MS   = 750;
 static const int        SPARK_END      = 420; // of 1000: the spark runs, then the pad lights up
 
 static UiCallbacks cbs;
-static lv_obj_t *titleLabel, *hostLabel;
+static lv_obj_t *titleLabel, *hostLabel, *clockLabel, *mainScr;
 static lv_obj_t *usbLabel, *bleLabel, *slotRow, *slotLabel, *pairBtn, *pairLabel;
 static bool pairingShown = false;
 static lv_obj_t *countLabel, *statsLabel, *noteLabel, *logLabel;
@@ -507,7 +511,7 @@ static lv_obj_t *makeAgentButton(lv_obj_t *parent)
 static const uint8_t BRIGHT_MIN = 5;
 
 static lv_obj_t *menuShade, *menuTitle, *hostNameLabel, *hostAddrLabel, *renameBtn;
-static lv_obj_t *animSwitch, *animHint, *daySlider, *nightSlider, *dayValue, *nightValue;
+static lv_obj_t *standbyMatrix, *animHint, *daySlider, *nightSlider, *dayValue, *nightValue;
 static lv_obj_t *renamePanel, *renameTitle, *renameText, *renameKbd;
 static uint8_t menuSlot;
 
@@ -522,12 +526,18 @@ static void setPercent(lv_obj_t *label, int32_t v)
 static void animSettingEvent(lv_event_t *e)
 {
     lv_obj_t *o = lv_event_get_target(e);
-    if (lv_event_get_code(e) == LV_EVENT_VALUE_CHANGED && o != animSwitch) {
+    if (lv_event_get_code(e) == LV_EVENT_VALUE_CHANGED && o != standbyMatrix) {
         setPercent(o == daySlider ? dayValue : nightValue, lv_slider_get_value(o));
         return;
     }
     AnimSettings s = anim_settings();
-    s.mode = lv_obj_has_state(animSwitch, LV_STATE_CHECKED) ? ANIM_MODE_STANDBY : ANIM_MODE_OFF;
+    uint16_t pick = lv_btnmatrix_get_selected_btn(standbyMatrix);
+    if (pick <= ANIM_MODE_BOTH) {
+        s.mode = pick;
+        // fires on the press; the matrix itself moves the check mark only on a clean
+        // release, which a finger that slides a little never delivers
+        lv_btnmatrix_set_btn_ctrl(standbyMatrix, pick, LV_BTNMATRIX_CTRL_CHECKED);
+    }
     s.brightness = lv_slider_get_value(daySlider);
     s.nightBrightness = lv_slider_get_value(nightSlider);
     anim_set_settings(s);
@@ -623,89 +633,123 @@ static void styleKnob(lv_obj_t *o, lv_style_selector_t glow)
 
 static lv_obj_t *makeSlider(lv_obj_t *row, const char *caption, lv_obj_t **value)
 {
-    lv_obj_t *l = makeLabel(row, &lv_font_montserrat_14, COLOR_DIM);
+    lv_obj_t *l = makeLabel(row, &lv_font_montserrat_16, COLOR_DIM);
     lv_label_set_text(l, caption);
+    lv_obj_set_width(l, 56);
     lv_obj_t *s = lv_slider_create(row);
-    lv_obj_set_height(s, 6);
+    lv_obj_set_height(s, 10);
     lv_obj_set_flex_grow(s, 1);
     lv_slider_set_range(s, BRIGHT_MIN, 255);
-    lv_obj_set_ext_click_area(s, 14);
+    lv_obj_set_ext_click_area(s, 24);
     lv_obj_set_style_bg_color(s, lv_color_hex(0x2C2C30), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s, LV_OPA_COVER, LV_PART_MAIN);
     styleNeon(s, LV_PART_INDICATOR);
     styleKnob(s, LV_PART_KNOB);
-    lv_obj_set_style_pad_all(s, 5, LV_PART_KNOB);
+    lv_obj_set_style_pad_all(s, 10, LV_PART_KNOB);
     lv_obj_add_event_cb(s, animSettingEvent, LV_EVENT_VALUE_CHANGED, nullptr);
     lv_obj_add_event_cb(s, animSettingEvent, LV_EVENT_RELEASED, nullptr);
-    *value = makeLabel(row, &lv_font_montserrat_14, COLOR_TEXT);
-    lv_obj_set_width(*value, 40);
+    *value = makeLabel(row, &lv_font_montserrat_16, COLOR_TEXT);
+    lv_obj_set_width(*value, 52);
     lv_obj_set_style_text_align(*value, LV_TEXT_ALIGN_RIGHT, 0);
     return s;
 }
 
 static void makeMenu()
 {
-    // Dimmed backdrop over the whole screen: catches the taps beside the card
-    menuShade = lv_obj_create(lv_layer_top());
+    // On the sys layer: under an opaque full-screen object there LVGL skips
+    // drawing the screen and the top layer (it does not for the top layer), which
+    // made every menu frame redraw the main screen's neon glows beneath
+    menuShade = lv_obj_create(lv_layer_sys());
     lv_obj_set_size(menuShade, lv_pct(100), lv_pct(100));
     lv_obj_set_style_bg_color(menuShade, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(menuShade, LV_OPA_70, 0);
     lv_obj_set_style_border_width(menuShade, 0, 0);
     lv_obj_set_style_radius(menuShade, 0, 0);
+    lv_obj_set_style_pad_all(menuShade, 0, 0);
     lv_obj_clear_flag(menuShade, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(menuShade, menuShadeEvent, LV_EVENT_CLICKED, nullptr);
     lv_obj_add_flag(menuShade, LV_OBJ_FLAG_HIDDEN);
 
+    // The whole screen, scrolling down: room for finger-sized controls
     lv_obj_t *c = makeCard();
     lv_obj_set_parent(c, menuShade);
-    lv_obj_set_width(c, lv_disp_get_hor_res(nullptr) - 56);
-    lv_obj_center(c);
-    lv_obj_set_style_pad_hor(c, 18, 0);
-    lv_obj_set_style_pad_row(c, 10, 0);
+    lv_obj_set_size(c, lv_pct(100), lv_pct(100));
+    lv_obj_set_pos(c, 0, 0);
+    lv_obj_set_style_radius(c, 0, 0);
+    lv_obj_set_style_border_width(c, 0, 0);
+    lv_obj_set_style_shadow_width(c, 0, 0);
+    lv_obj_set_style_bg_color(c, lv_color_black(), 0);
+    lv_obj_set_style_pad_hor(c, 20, 0);
+    lv_obj_set_style_pad_ver(c, 12, 0);
+    lv_obj_set_style_pad_row(c, 14, 0);
     lv_obj_set_flex_align(c, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_add_flag(c, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(c, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(c, LV_SCROLLBAR_MODE_ACTIVE);
+    lv_obj_set_style_bg_color(c, lv_color_hex(COLOR_NEON), LV_PART_SCROLLBAR);
+    lv_obj_set_style_width(c, 4, LV_PART_SCROLLBAR);
     lv_obj_clear_flag(c, LV_OBJ_FLAG_HIDDEN);
 
     lv_obj_t *r = makeMenuRow(c);
-    menuTitle = makeLabel(r, &lv_font_montserrat_16, COLOR_NEON_HI);
+    menuTitle = makeLabel(r, &lv_font_montserrat_20, COLOR_NEON_HI);
     lv_obj_t *close = makePillButton(r, COLOR_DIM);
-    lv_obj_set_style_pad_hor(close, 10, 0);
-    lv_obj_set_style_pad_ver(close, 5, 0);
-    lv_obj_t *l = makeLabel(close, &lv_font_montserrat_14, COLOR_TEXT);
+    lv_obj_set_style_pad_hor(close, 18, 0);
+    lv_obj_set_style_pad_ver(close, 10, 0);
+    lv_obj_t *l = makeLabel(close, &lv_font_montserrat_18, COLOR_TEXT);
     lv_label_set_text(l, LV_SYMBOL_CLOSE);
     lv_obj_add_event_cb(close, [](lv_event_t *) { ui_close_menu(); }, LV_EVENT_CLICKED, nullptr);
 
     r = makeMenuRow(c);
     makeMenuText(r, &hostNameLabel, &hostAddrLabel);
     renameBtn = makePillButton(r, COLOR_NEON);
-    l = makeLabel(renameBtn, &lv_font_montserrat_14, COLOR_NEON_HI);
+    lv_obj_set_style_pad_hor(renameBtn, 22, 0);
+    lv_obj_set_style_pad_ver(renameBtn, 12, 0);
+    l = makeLabel(renameBtn, &lv_font_montserrat_18, COLOR_NEON_HI);
     lv_label_set_text(l, LV_SYMBOL_EDIT " Rename");
     lv_obj_add_event_cb(renameBtn, renameEvent, LV_EVENT_CLICKED, nullptr);
 
     r = makeMenuRow(c);
     lv_obj_t *animName;
     makeMenuText(r, &animName, &animHint);
-    lv_label_set_text(animName, "Standby animation");
-    animSwitch = lv_switch_create(r);
-    lv_obj_set_size(animSwitch, 50, 26);
-    lv_obj_set_style_bg_color(animSwitch, lv_color_hex(0x2C2C30), LV_PART_MAIN);
-    styleNeon(animSwitch, LV_PART_INDICATOR | LV_STATE_CHECKED);
-    styleKnob(animSwitch, LV_PART_KNOB | LV_STATE_CHECKED);
-    lv_obj_set_ext_click_area(animSwitch, 10);
-    lv_obj_add_event_cb(animSwitch, animSettingEvent, LV_EVENT_VALUE_CHANGED, nullptr);
+    lv_label_set_text(animName, "Standby screen");
+    // Off / the animation / the dashboard / both in turns (anim.h)
+    static const char *standbyMap[] = {"Off", "Anim", "Dash", "Both", ""};
+    standbyMatrix = lv_btnmatrix_create(c);          // a row of its own, finger-sized
+    lv_btnmatrix_set_map(standbyMatrix, standbyMap);
+    lv_btnmatrix_set_btn_ctrl_all(standbyMatrix, LV_BTNMATRIX_CTRL_CHECKABLE);
+    lv_btnmatrix_set_one_checked(standbyMatrix, true);
+    lv_obj_set_size(standbyMatrix, lv_pct(100), 60);
+    lv_obj_add_flag(standbyMatrix, LV_OBJ_FLAG_PRESS_LOCK); // a finger that slides keeps its press
+    lv_obj_set_style_bg_opa(standbyMatrix, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(standbyMatrix, 0, 0);
+    lv_obj_set_style_pad_all(standbyMatrix, 0, 0);
+    lv_obj_set_style_pad_gap(standbyMatrix, 10, 0);
+    lv_obj_set_style_text_font(standbyMatrix, &lv_font_montserrat_18, LV_PART_ITEMS);
+    lv_obj_set_style_text_color(standbyMatrix, lv_color_hex(COLOR_TEXT), LV_PART_ITEMS);
+    lv_obj_set_style_bg_color(standbyMatrix, lv_color_hex(0x2C2C30), LV_PART_ITEMS);
+    lv_obj_set_style_bg_opa(standbyMatrix, LV_OPA_COVER, LV_PART_ITEMS);
+    styleNeon(standbyMatrix, LV_PART_ITEMS | LV_STATE_CHECKED);
+    lv_obj_set_style_text_color(standbyMatrix, lv_color_white(), LV_PART_ITEMS | LV_STATE_CHECKED);
+    lv_obj_set_style_radius(standbyMatrix, LV_RADIUS_CIRCLE, LV_PART_ITEMS);
+    lv_obj_set_style_shadow_width(standbyMatrix, 0, LV_PART_ITEMS);
+    lv_obj_set_style_border_width(standbyMatrix, 0, LV_PART_ITEMS);
+    lv_obj_add_event_cb(standbyMatrix, animSettingEvent, LV_EVENT_VALUE_CHANGED, nullptr);
 
     l = makeLabel(c, &lv_font_montserrat_12, COLOR_DIM);
-    lv_label_set_text(l, "Brightness of the animation and the live spectrum");
+    lv_label_set_text(l, "Brightness of the standby screen and the live spectrum");
     lv_obj_set_style_pad_bottom(l, -4, 0);
     r = makeMenuRow(c);
-    lv_obj_set_style_pad_column(r, 12, 0);
+    lv_obj_set_style_pad_column(r, 16, 0);
     daySlider = makeSlider(r, "Day", &dayValue);
+    r = makeMenuRow(c);
+    lv_obj_set_style_pad_column(r, 16, 0);
     nightSlider = makeSlider(r, "Night", &nightValue);
 }
 
 // Full screen: the name above the keyboard (OK saves, the close key cancels)
 static void makeRenamePanel()
 {
-    renamePanel = lv_obj_create(lv_layer_top());
+    renamePanel = lv_obj_create(lv_layer_sys()); // opaque, full screen: nothing beneath is drawn
     lv_obj_set_size(renamePanel, lv_pct(100), lv_pct(100));
     lv_obj_set_style_bg_color(renamePanel, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(renamePanel, LV_OPA_COVER, 0);
@@ -786,7 +830,12 @@ static void updateMenu(const BleHidStatus &ble)
     setVisible(renameBtn, used);
     if (!used)
         showRename(false); // the host went away meanwhile
-    setText(animHint, anim_available() ? "when idle, without the live spectrum" : "no animation uploaded yet");
+    uint8_t mode = anim_settings().mode;
+    setText(animHint, mode == ANIM_MODE_OFF         ? "dims, then switches off"
+                      : mode == ANIM_MODE_DASHBOARD ? "clock, meetings, PC load"
+                      : !anim_available()           ? "no animation uploaded yet"
+                      : mode == ANIM_MODE_BOTH      ? "dashboard and animation in turns"
+                                                    : "animation when idle");
 }
 
 void ui_open_menu()
@@ -795,10 +844,7 @@ void ui_open_menu()
     ble_hid_get_status(ble);
     menuSlot = ble.slot;
     const AnimSettings &s = anim_settings();
-    if (s.mode == ANIM_MODE_STANDBY)
-        lv_obj_add_state(animSwitch, LV_STATE_CHECKED);
-    else
-        lv_obj_clear_state(animSwitch, LV_STATE_CHECKED);
+    lv_btnmatrix_set_btn_ctrl(standbyMatrix, min<uint8_t>(s.mode, ANIM_MODE_BOTH), LV_BTNMATRIX_CTRL_CHECKED);
     lv_slider_set_value(daySlider, s.brightness, LV_ANIM_OFF);
     lv_slider_set_value(nightSlider, s.nightBrightness, LV_ANIM_OFF);
     setPercent(dayValue, lv_slider_get_value(daySlider));
@@ -849,6 +895,367 @@ static void groupDigits(uint64_t v, char *out, size_t size)
 }
 
 // ---------------- Public ----------------
+// ---------------- Meeting reminder (top layer) ----------------
+// CAL_REMIND_MIN before a meeting: when, what, its time and an "X" that
+// dismisses it. A confirmed meeting gets a solid card, a tentative one a
+// translucent card. On the LVGL screens it is an ordinary object; while the
+// standby animation / live spectrum own the panel a snapshot of it goes to the
+// overlay compositor (overlay.h), blended into whatever they draw.
+static const lv_coord_t REMIND_X = 10, REMIND_Y = 4, REMIND_W = 394, REMIND_H = 40; // over the title row
+static lv_obj_t    *remindCard, *remindWhen, *remindTitle, *remindTime, *remindClose;
+static uint16_t     remindId;
+static bool         remindChanged, overlayOn;
+static uint8_t     *remindSnap;
+static uint32_t     remindSnapSize;
+static lv_img_dsc_t remindDsc;
+
+static void remindCloseEvent(lv_event_t *)
+{
+    cal_dismiss(remindId);
+}
+
+static void makeReminderCard()
+{
+    remindCard = lv_obj_create(lv_layer_top());
+    lv_obj_set_pos(remindCard, REMIND_X, REMIND_Y);
+    lv_obj_set_size(remindCard, REMIND_W, REMIND_H);
+    lv_obj_set_style_bg_color(remindCard, lv_color_hex(0x121216), 0);
+    lv_obj_set_style_border_width(remindCard, 1, 0);
+    lv_obj_set_style_radius(remindCard, 14, 0);
+    lv_obj_set_style_shadow_width(remindCard, 0, 0); // nothing outside its box: the snapshot is the card
+    lv_obj_set_style_pad_hor(remindCard, 12, 0);
+    lv_obj_set_style_pad_ver(remindCard, 0, 0);
+    lv_obj_set_style_pad_column(remindCard, 8, 0);
+    lv_obj_set_flex_flow(remindCard, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(remindCard, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(remindCard, LV_OBJ_FLAG_SCROLLABLE);
+    remindWhen = makeLabel(remindCard, &lv_font_montserrat_16, COLOR_AMBER);
+    remindTitle = makeLabel(remindCard, &lv_font_montserrat_16, 0xFFFFFF);
+    lv_obj_set_flex_grow(remindTitle, 1);
+    lv_label_set_long_mode(remindTitle, LV_LABEL_LONG_DOT);
+    remindTime = makeLabel(remindCard, &lv_font_montserrat_12, COLOR_DIM);
+    remindClose = lv_btn_create(remindCard);
+    lv_obj_set_size(remindClose, 30, 30);
+    lv_obj_set_style_bg_color(remindClose, lv_color_hex(0x2C2C30), 0);
+    lv_obj_set_style_bg_opa(remindClose, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(remindClose, lv_color_hex(COLOR_RED), LV_STATE_PRESSED);
+    lv_obj_set_style_radius(remindClose, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_shadow_width(remindClose, 0, 0);
+    lv_obj_set_style_pad_all(remindClose, 0, 0);
+    lv_obj_set_ext_click_area(remindClose, 8);
+    lv_obj_t *x = makeLabel(remindClose, &lv_font_montserrat_14, COLOR_TEXT);
+    lv_label_set_text(x, LV_SYMBOL_CLOSE);
+    lv_obj_center(x);
+    lv_obj_add_event_cb(remindClose, remindCloseEvent, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_flag(remindCard, LV_OBJ_FLAG_HIDDEN);
+}
+
+// "15:00" of the moment `minutes` from now by the adapter's clock; "" without one
+static void clockPlus(int32_t minutes, char *out, size_t size)
+{
+    uint8_t h, m, s;
+    if (!anim_clock_now(h, m, s)) {
+        out[0] = 0;
+        return;
+    }
+    int32_t t = ((h * 60 + m + minutes) % 1440 + 1440) % 1440;
+    snprintf(out, size, "%02ld:%02ld", (long)(t / 60), (long)(t % 60));
+}
+
+static void updateReminder()
+{
+    static uint16_t shownId = 0xFFFF;
+    static uint8_t  shownFlags = 0xFF;
+    CalEvent e;
+    bool show = cal_reminder(e);
+    if (show) {
+        char when[24], t0[8], t1[8], range[24];
+        int32_t m = cal_minutes_to(e);
+        if (m > 0)
+            snprintf(when, sizeof(when), "in %ld min", (long)m);
+        else
+            snprintf(when, sizeof(when), "now");
+        clockPlus(m, t0, sizeof(t0));
+        clockPlus(m + e.durMin, t1, sizeof(t1));
+        if (t0[0])
+            snprintf(range, sizeof(range), "%s - %s", t0, t1);
+        else
+            snprintf(range, sizeof(range), "%u min", e.durMin);
+        remindChanged |= strcmp(lv_label_get_text(remindWhen), when) || strcmp(lv_label_get_text(remindTitle), e.title)
+                      || strcmp(lv_label_get_text(remindTime), range) || e.id != shownId || e.flags != shownFlags;
+        setText(remindWhen, when);
+        setText(remindTitle, e.title);
+        setText(remindTime, range);
+        if (e.flags != shownFlags) {
+            bool solid = e.flags & CAL_CONFIRMED;
+            lv_obj_set_style_bg_opa(remindCard, solid ? LV_OPA_COVER : LV_OPA_60, 0);
+            lv_obj_set_style_border_color(remindCard, lv_color_hex(solid ? COLOR_AMBER : COLOR_DIM), 0);
+            lv_obj_set_style_border_opa(remindCard, solid ? LV_OPA_COVER : LV_OPA_60, 0);
+        }
+        shownId = remindId = e.id;
+        shownFlags = e.flags;
+    }
+    if (show == lv_obj_has_flag(remindCard, LV_OBJ_FLAG_HIDDEN))
+        remindChanged = true;
+    setVisible(remindCard, show);
+}
+
+bool ui_reminder_loop(bool panelTaken)
+{
+    updateReminder();
+    bool want = panelTaken && !lv_obj_has_flag(remindCard, LV_OBJ_FLAG_HIDDEN);
+    if (!want) {
+        if (!overlayOn)
+            return false;
+        uint16_t x, y, w, h;
+        overlay_rect(x, y, w, h);
+        overlay_clear();
+        overlayOn = false;
+        display_fill(x, y, w, h); // the owner of the panel repaints its part
+        return true;
+    }
+    if (overlayOn && !remindChanged)
+        return false;
+    lv_obj_update_layout(remindCard);
+    uint32_t need = lv_snapshot_buf_size_needed(remindCard, LV_IMG_CF_TRUE_COLOR_ALPHA);
+    if (need > remindSnapSize) {
+        free(remindSnap);
+#ifdef ARDUINO
+        remindSnap = (uint8_t *)ps_malloc(need);
+#else
+        remindSnap = (uint8_t *)malloc(need);
+#endif
+        remindSnapSize = remindSnap ? need : 0;
+    }
+    if (!remindSnap
+        || lv_snapshot_take_to_buf(remindCard, LV_IMG_CF_TRUE_COLOR_ALPHA, &remindDsc, remindSnap, need) != LV_RES_OK)
+        return false;
+    lv_area_t a;
+    lv_obj_get_coords(remindCard, &a);
+    lv_coord_t ext = _lv_obj_get_ext_draw_size(remindCard);
+    overlay_set(a.x1 - ext, a.y1 - ext, remindDsc.header.w, remindDsc.header.h, remindSnap);
+    overlayOn = true;
+    remindChanged = false;
+    display_overlay_show();
+    return true;
+}
+
+bool ui_reminder_touch(int16_t x, int16_t y)
+{
+    if (lv_obj_has_flag(remindCard, LV_OBJ_FLAG_HIDDEN))
+        return false;
+    lv_area_t a;
+    lv_obj_get_coords(remindClose, &a);
+    const lv_coord_t m = 12; // fingers
+    if (x < a.x1 - m || x > a.x2 + m || y < a.y1 - m || y > a.y2 + m)
+        return false;
+    cal_dismiss(remindId);
+    return true;
+}
+
+// ---------------- Dashboard (standby screen) ----------------
+// The next meeting along the top (the reminder card covers that line when it
+// is up), the clock and the date, and the computer's load in six tiles, each
+// with a minute of history. Its own LVGL screen, loaded instead of the main one.
+static const uint8_t    DASH_TILES = 6, DASH_POINTS = 60;
+static const lv_coord_t TILE_Y = 118, TILE_W = 82, TILE_H = 116, TILE_GAP = 6, TILE_X0 = 6;
+static lv_obj_t *dashScr, *dashClock, *dashDate, *dashNext;
+static lv_obj_t *dashValues[DASH_TILES], *dashTemps[DASH_TILES], *dashCharts[DASH_TILES];
+static lv_chart_series_t *dashSeries[DASH_TILES];
+static lv_coord_t dashHist[DASH_TILES][DASH_POINTS];
+static bool       dashShown, dashLive;
+static const char *const dashNames[DASH_TILES] = {"CPU", "RAM", "GPU", "VRAM", "NET", "DISK"};
+static const uint32_t    dashColors[DASH_TILES] = {COLOR_NEON, COLOR_VIOLET, 0x2EC4FF, 0x39FFC8, COLOR_GREEN, COLOR_AMBER};
+
+static void makeDashboard()
+{
+    dashScr = lv_obj_create(nullptr);
+    lv_obj_set_style_bg_color(dashScr, lv_color_black(), 0);
+    lv_obj_set_style_pad_all(dashScr, 0, 0);
+    lv_obj_clear_flag(dashScr, LV_OBJ_FLAG_SCROLLABLE);
+
+    dashNext = makeLabel(dashScr, &lv_font_montserrat_16, COLOR_AMBER);
+    lv_obj_set_pos(dashNext, 14, 16);
+    lv_obj_set_width(dashNext, 508);
+    lv_label_set_long_mode(dashNext, LV_LABEL_LONG_DOT);
+    dashClock = makeLabel(dashScr, &lv_font_montserrat_48, COLOR_TEXT);
+    lv_obj_set_pos(dashClock, 12, 50);
+    dashDate = makeLabel(dashScr, &lv_font_montserrat_16, COLOR_DIM);
+    lv_obj_set_pos(dashDate, 176, 80);
+
+    for (uint8_t i = 0; i < DASH_TILES; i++) {
+        lv_obj_t *t = lv_obj_create(dashScr);
+        lv_obj_set_pos(t, TILE_X0 + i * (TILE_W + TILE_GAP), TILE_Y);
+        lv_obj_set_size(t, TILE_W, TILE_H);
+        lv_obj_set_style_bg_color(t, lv_color_hex(0x101014), 0);
+        lv_obj_set_style_border_width(t, 0, 0);
+        lv_obj_set_style_radius(t, 10, 0);
+        lv_obj_set_style_pad_all(t, 6, 0);
+        lv_obj_clear_flag(t, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_t *name = makeLabel(t, &lv_font_montserrat_12, COLOR_DIM);
+        lv_label_set_text(name, dashNames[i]);
+        lv_obj_align(name, LV_ALIGN_TOP_LEFT, 0, 1);
+        dashValues[i] = makeLabel(t, &lv_font_montserrat_14, dashColors[i]);
+        lv_label_set_text(dashValues[i], "-");
+        lv_obj_align(dashValues[i], LV_ALIGN_TOP_RIGHT, 0, 0);
+        dashTemps[i] = makeLabel(t, &lv_font_montserrat_12, COLOR_DIM); // CPU / GPU temperature
+        lv_obj_align(dashTemps[i], LV_ALIGN_TOP_RIGHT, 0, 17);
+        lv_obj_t *ch = dashCharts[i] = lv_chart_create(t);
+        lv_obj_set_size(ch, TILE_W - 12, TILE_H - 46);
+        lv_obj_align(ch, LV_ALIGN_BOTTOM_MID, 0, 0);
+        lv_chart_set_type(ch, LV_CHART_TYPE_LINE);
+        lv_chart_set_point_count(ch, DASH_POINTS);
+        lv_chart_set_div_line_count(ch, 0, 0);
+        lv_chart_set_range(ch, LV_CHART_AXIS_PRIMARY_Y, 0, 100);
+        lv_obj_set_style_bg_opa(ch, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(ch, 0, 0);
+        lv_obj_set_style_pad_all(ch, 0, 0);
+        lv_obj_set_style_line_width(ch, 2, LV_PART_ITEMS);
+        lv_obj_set_style_size(ch, 0, LV_PART_INDICATOR);
+        dashSeries[i] = lv_chart_add_series(ch, lv_color_hex(dashColors[i]), LV_CHART_AXIS_PRIMARY_Y);
+        for (uint8_t k = 0; k < DASH_POINTS; k++)
+            dashHist[i][k] = LV_CHART_POINT_NONE;
+        lv_chart_set_ext_y_array(ch, dashSeries[i], dashHist[i]);
+    }
+}
+
+// Newest value at the right; the range of a rate tile follows its minute
+static void pushPoint(uint8_t i, lv_coord_t v, bool autoRange)
+{
+    memmove(dashHist[i], dashHist[i] + 1, sizeof(lv_coord_t) * (DASH_POINTS - 1));
+    dashHist[i][DASH_POINTS - 1] = v;
+    if (autoRange) {
+        lv_coord_t top = 100;
+        for (uint8_t k = 0; k < DASH_POINTS; k++)
+            if (dashHist[i][k] != LV_CHART_POINT_NONE && dashHist[i][k] > top)
+                top = dashHist[i][k];
+        lv_chart_set_range(dashCharts[i], LV_CHART_AXIS_PRIMARY_Y, 0, top);
+    }
+    lv_chart_refresh(dashCharts[i]);
+}
+
+static void percentText(uint8_t v, char *out, size_t size)
+{
+    if (v == 0xFF)
+        snprintf(out, size, "-");
+    else
+        snprintf(out, size, "%u%%", v);
+}
+
+static void tempText(uint8_t t, char *out, size_t size)
+{
+    if (t == 0xFF)
+        out[0] = 0;
+    else
+        snprintf(out, size, "%u\xC2\xB0", t);
+}
+
+static void rateText(uint32_t kb, char *out, size_t size) // KB/s
+{
+    if (kb >= 10240)
+        snprintf(out, size, "%luM", (unsigned long)(kb / 1024));
+    else if (kb >= 1024)
+        snprintf(out, size, "%lu.%luM", (unsigned long)(kb / 1024), (unsigned long)(kb % 1024 * 10 / 1024));
+    else
+        snprintf(out, size, "%luK", (unsigned long)kb);
+}
+
+static void updateDashboard()
+{
+    char buf[64];
+    uint8_t h, m, s;
+    if (anim_clock_now(h, m, s))
+        snprintf(buf, sizeof(buf), "%02u:%02u", h, m);
+    else
+        snprintf(buf, sizeof(buf), "--:--");
+    setText(dashClock, buf);
+
+    static uint32_t dateReadMs = 0;
+    static char     date[40];
+    if (!dateReadMs || millis() - dateReadMs > 30000) { // the RTC sits on I2C: not every tick
+        dateReadMs = millis();
+        uint16_t y;
+        uint8_t  mo, d;
+        if (display_rtc_read_date(y, mo, d)) {
+            static const char *const days[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+            static const char *const months[] = {"January", "February", "March", "April", "May", "June",
+                                                 "July", "August", "September", "October", "November", "December"};
+            static const int t[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4}; // Sakamoto's day of the week
+            int yy = y - (mo < 3);
+            int wd = (yy + yy / 4 - yy / 100 + yy / 400 + t[mo - 1] + d) % 7;
+            snprintf(date, sizeof(date), "%s, %u %s", days[wd], d, months[mo - 1]);
+        } else {
+            date[0] = 0;
+        }
+    }
+    setText(dashDate, date);
+
+    CalEvent e;
+    bool remind = !lv_obj_has_flag(remindCard, LV_OBJ_FLAG_HIDDEN);
+    buf[0] = 0;
+    if (cal_next(e)) {
+        int32_t mins = cal_minutes_to(e);
+        char t0[8];
+        clockPlus(mins, t0, sizeof(t0));
+        if (mins > 0)
+            snprintf(buf, sizeof(buf), LV_SYMBOL_BELL "  %s%s%s  -  in %ld min", t0, t0[0] ? "  " : "", e.title, (long)mins);
+        else
+            snprintf(buf, sizeof(buf), LV_SYMBOL_BELL "  now: %s", e.title);
+    } else if (cal_has_data()) {
+        snprintf(buf, sizeof(buf), LV_SYMBOL_BELL "  no more meetings");
+    }
+    setText(dashNext, buf);
+    setVisible(dashNext, !remind);
+
+    SysSample sm;
+    if (sysmon_take(sm)) {
+        char v[16];
+        const uint8_t pct[4] = {sm.cpu, sm.ram, sm.gpu, sm.vram};
+        for (uint8_t i = 0; i < 4; i++) {
+            percentText(pct[i], v, sizeof(v));
+            setText(dashValues[i], v);
+        }
+        tempText(sm.cpuTemp, v, sizeof(v));
+        setText(dashTemps[0], v);
+        tempText(sm.gpuTemp, v, sizeof(v));
+        setText(dashTemps[2], v);
+        uint32_t net = (sm.netRx == 0xFFFF ? 0 : sm.netRx) + (sm.netTx == 0xFFFF ? 0 : sm.netTx);
+        uint32_t disk = ((sm.diskR == 0xFFFF ? 0 : sm.diskR) + (sm.diskW == 0xFFFF ? 0 : sm.diskW)) * 100UL;
+        rateText(net, v, sizeof(v));
+        setText(dashValues[4], v);
+        rateText(disk, v, sizeof(v));
+        setText(dashValues[5], v);
+        for (uint8_t i = 0; i < 4; i++)
+            pushPoint(i, pct[i] == 0xFF ? LV_CHART_POINT_NONE : pct[i], false);
+        pushPoint(4, min<uint32_t>(net, 30000), true);
+        pushPoint(5, min<uint32_t>(disk, 30000), true);
+    }
+    bool live = sysmon_streaming();
+    if (live != dashLive) {
+        dashLive = live;
+        for (uint8_t i = 0; i < DASH_TILES; i++) {
+            lv_obj_set_style_text_color(dashValues[i], lv_color_hex(live ? dashColors[i] : COLOR_DIM), 0);
+            if (!live)
+                setText(dashValues[i], "-");
+        }
+    }
+}
+
+void ui_show_dashboard(bool on)
+{
+    if (on == dashShown)
+        return;
+    dashShown = on;
+    if (on)
+        updateDashboard();
+    lv_scr_load(on ? dashScr : mainScr);
+}
+
+bool ui_dashboard_shown()
+{
+    return dashShown;
+}
+
 void ui_begin(const UiCallbacks &cb)
 {
     cbs = cb;
@@ -858,7 +1265,7 @@ void ui_begin(const UiCallbacks &cb)
         if (lv_indev_get_type(i) == LV_INDEV_TYPE_POINTER)
             i->driver->long_press_time = LONG_PRESS_MS;
 
-    lv_obj_t *scr = lv_scr_act();
+    lv_obj_t *scr = mainScr = lv_scr_act();
     lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
     lv_obj_set_style_pad_all(scr, 10, 0);
     lv_obj_set_style_pad_column(scr, 10, 0);
@@ -880,7 +1287,14 @@ void ui_begin(const UiCallbacks &cb)
     lv_obj_set_flex_grow(hostLabel, 1);
     lv_label_set_long_mode(hostLabel, LV_LABEL_LONG_DOT);
 
-    usbLabel = makeLabel(left, &lv_font_montserrat_16, COLOR_TEXT);
+    // The keyboard, and the adapter's clock at the right end of its line
+    lv_obj_t *usbRow = makeContainer(left, LV_FLEX_FLOW_ROW);
+    lv_obj_set_width(usbRow, lv_pct(100));
+    lv_obj_set_style_pad_column(usbRow, 8, 0);
+    usbLabel = makeLabel(usbRow, &lv_font_montserrat_16, COLOR_TEXT);
+    lv_obj_set_flex_grow(usbLabel, 1);
+    lv_label_set_long_mode(usbLabel, LV_LABEL_LONG_DOT);
+    clockLabel = makeLabel(usbRow, &lv_font_montserrat_16, COLOR_DIM);
     bleLabel = makeLabel(left, &lv_font_montserrat_16, COLOR_TEXT);
 
     slotRow = makeContainer(left, LV_FLEX_FLOW_ROW_WRAP);
@@ -905,10 +1319,12 @@ void ui_begin(const UiCallbacks &cb)
     makeStrip(scr);
     layoutStrip();
     makeHoldBar();
+    makeReminderCard(); // under the menu and the pop-ups
     makeMenu();
     makeRenamePanel();
     makeAgentCard();
     makePasskeyCard();
+    makeDashboard();
 }
 
 void ui_update(const char *bootNote)
@@ -930,6 +1346,12 @@ void ui_update(const char *bootNote)
     const char *host = ble.slotUsed[ble.slot] ? ble.slotName[ble.slot] : "";
     snprintf(buf, sizeof(buf), "- %s", host);
     setText(hostLabel, host[0] ? buf : "");
+    uint8_t hh, mm, ss;
+    if (anim_clock_now(hh, mm, ss))
+        snprintf(buf, sizeof(buf), "%02u:%02u", hh, mm);
+    else
+        buf[0] = 0;
+    setText(clockLabel, buf);
 
     if (ble.slot != shownSlot) // changed elsewhere (boot): no animation
         showSlot(ble.slot, false);
@@ -1036,4 +1458,7 @@ void ui_update(const char *bootNote)
     static char logBuf[1024];
     if (log_screen_text(logBuf, sizeof(logBuf)))
         lv_label_set_text(logLabel, logBuf);
+
+    if (dashShown)
+        updateDashboard();
 }

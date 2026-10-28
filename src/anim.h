@@ -26,7 +26,8 @@
  * Commands from the computer (OTA control characteristic, ota.h):
  *   10 play now (until stopped or touched)    11 stop
  *   12 <mode u8> <delay_s u16> <brightness u8> <off_after_s u16> [<night u8>]   standby settings
- *        mode 0 = dim / off as before, 1 = play the animation when idle;
+ *        mode 0 = dim / off as before, 1 = play the animation when idle, 2 = the dashboard
+ *        (clock, next meeting, the computer's load - ui.cpp), 3 = both in turns;
  *        brightness = by day, night = at night (see anim_brightness_now());
  *        off_after_s: screen off after this much standby animation (0 = never)
  *   13 info -> notification 10 <version u8> <frames u16> <width u16> <height u16>
@@ -39,7 +40,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-enum : uint8_t { ANIM_MODE_OFF = 0, ANIM_MODE_STANDBY = 1 };
+// Standby after the idle delay: nothing (dim / off), the animation, the
+// dashboard (clock, next meeting, the computer's load - ui.cpp), or both in turns
+enum : uint8_t { ANIM_MODE_OFF = 0, ANIM_MODE_STANDBY = 1, ANIM_MODE_DASHBOARD = 2, ANIM_MODE_BOTH = 3 };
 enum AnimEvent : uint8_t { ANIM_EV_NONE, ANIM_EV_PLAY, ANIM_EV_STOP };
 
 struct AnimSettings {
@@ -58,6 +61,8 @@ void anim_set_settings(const AnimSettings &s); // from the screen's settings men
 // level until 6:00, up to the day level by 9:00, back down 18:00..22:00; the day
 // level while the clock is not set (never set, or its backup cell ran flat)
 uint8_t anim_brightness_now();
+// The adapter's clock (RTC, set by the computer); false = not set yet
+bool    anim_clock_now(uint8_t &hour, uint8_t &minute, uint8_t &second);
 
 // Storage, from the OTA task: begin stops the player and erases, finish validates
 uint32_t anim_storage_size();
@@ -76,3 +81,4 @@ void      anim_start();                     // takes over the panel (the caller 
 void      anim_stop();                      // gives the panel back to LVGL (full redraw)
 bool      anim_playing();
 uint32_t  anim_played_ms();                 // since anim_start()
+void      anim_redraw();                    // push the current frame again (the overlay changed)

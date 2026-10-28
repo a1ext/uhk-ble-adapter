@@ -2,8 +2,11 @@
 #include <LilyGo_AMOLED.h>
 #include <LV_Helper.h>
 #include <Wire.h>
+#include <esp_system.h>
 #include <math.h>
 #include "config.h"
+#include "log.h"
+#include "overlay.h"
 
 static LilyGo_Class amoled;
 
@@ -36,6 +39,8 @@ bool display_begin()
     amoled.setRotation(DISPLAY_ROTATION);
     beginLvglHelper(amoled);
     amoled.setBrightness(DISPLAY_BRIGHTNESS);
+    logf("Display: CPU %u MHz, free heap %u (largest block %u)", getCpuFrequencyMhz(), ESP.getFreeHeap(),
+         ESP.getMaxAllocHeap());
     return true;
 }
 
@@ -93,9 +98,30 @@ uint16_t display_height()
     return amoled.height();
 }
 
-void display_push(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t *pixels)
+static void rawPush(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t *pixels)
 {
     amoled.pushColors(x, y, w, h, pixels);
+}
+
+void display_push(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t *pixels)
+{
+    overlay_push(x, y, w, h, pixels, rawPush);
+}
+
+void display_overlay_show()
+{
+    overlay_show(rawPush);
+}
+
+void display_fill(uint16_t x, uint16_t y, uint16_t w, uint16_t h)
+{
+    const uint16_t rows = 16;
+    uint16_t *strip = (uint16_t *)ps_calloc((size_t)w * rows, 2);
+    if (!strip)
+        return;
+    for (uint16_t yy = y; yy < y + h; yy += rows)
+        display_push(x, yy, w, min<uint16_t>(rows, y + h - yy), strip);
+    free(strip);
 }
 
 static const uint8_t PCF85063_ADDR = 0x51, PCF85063_SECONDS = 0x04, PCF85063_OS = 0x80;
@@ -116,6 +142,20 @@ bool display_rtc_read(uint8_t &hour, uint8_t &minute, uint8_t &second)
     hour = t.hour;
     minute = t.minute;
     second = t.second;
+    return true;
+}
+
+bool display_rtc_read_date(uint16_t &year, uint8_t &month, uint8_t &day)
+{
+    uint8_t h, m, s;
+    if (!display_rtc_read(h, m, s))
+        return false;
+    RTC_DateTime t = amoled.getDateTime();
+    if (t.month < 1 || t.month > 12 || t.day < 1 || t.day > 31 || t.year < 2024)
+        return false;
+    year = t.year;
+    month = t.month;
+    day = t.day;
     return true;
 }
 

@@ -179,11 +179,13 @@
     </figure>
   </div>
 
-  <h2 id="windows">Animation and live spectrum (Windows)</h2>
+  <h2 id="windows">Animation, live spectrum, dashboard and reminders (Windows)</h2>
   <p>
-    When it is idle, the adapter can play an animation, or show the spectrum of whatever the PC is
-    playing, streamed live. Both come from the Windows PC paired on the active slot, with two small
-    programs that need no installation and no Python.
+    When it is idle, the adapter can play an animation, show a dashboard with the clock, your next
+    meeting and the PC's load, or the spectrum of whatever the PC is playing, streamed live. Fifteen
+    minutes before a meeting a reminder card appears over whatever is on the screen. All of it comes
+    from the Windows PC paired on the active slot, with two small programs that need no installation and
+    no Python.
   </p>
   <div class="gallery">
     <figure>
@@ -194,10 +196,18 @@
       <img src="img/screen-live.png" alt="Live spectrum: 48 bars from pink (bass) through violet to teal (treble), with peak caps and a dim reflection" width="1128" height="536">
       <figcaption>Live spectrum of the PC's audio.</figcaption>
     </figure>
+    <figure>
+      <img src="img/screen-dash.png" alt="Dashboard: the next meeting along the top, a large clock with the date, and six tiles - CPU, RAM, GPU, VRAM, NET, DISK - each with a sparkline of the last minute" width="1128" height="536">
+      <figcaption>Dashboard: clock, next meeting, the PC's load.</figcaption>
+    </figure>
+    <figure>
+      <img src="img/screen-live-remind.png" alt="The live spectrum with a translucent reminder card over it: in 4 min, 1:1 with Anna, 14:41 to 15:41, and an X button" width="1128" height="536">
+      <figcaption>A meeting reminder over the spectrum.</figcaption>
+    </figure>
   </div>
   <div class="downloads">
     <div class="card">
-      <h3>Live spectrum</h3>
+      <h3>Live spectrum, dashboard, reminders</h3>
       <p>Runs as an icon in the notification area, no window.</p>
       <a class="dl" href="download/uhk-ble-live.exe" download>uhk-ble-live.exe</a><span class="size">~30 MB</span>
     </div>
@@ -226,8 +236,9 @@
     <li>Double-click <b>uhk-ble-live.exe</b>. An icon with bars appears in the notification area (maybe in
       the overflow behind the ^ arrow), and the bars show on the adapter as soon as the PC plays
       something.</li>
-    <li>The icon's menu shows the status and has <b>Pause / Resume</b> (also a left click), <b>Auto gain</b>
-      (quiet music still fills the bars), <b>Open log</b> and <b>Exit</b>.</li>
+    <li>The icon's menu shows the status and has <b>Pause / Resume</b> (also a left click), the switches
+      <b>Audio spectrum</b>, <b>System stats</b> and <b>Calendar reminders</b>, <b>Auto gain</b> (quiet
+      music still fills the bars), <b>Edit settings</b>, <b>Open log</b> and <b>Exit</b>.</li>
     <li>The icon turns grey while the adapter is out of reach or another slot is active. The program tries
       again every 10 s, so it can stay running.</li>
     <li>A touch on the adapter shows its normal screen; the spectrum comes back after 30 s.</li>
@@ -239,12 +250,36 @@
     band levels: about 50 bytes, 60 times a second. The keyboard's own traffic is not affected.
   </p>
 
+  <h3>Dashboard and meeting reminders</h3>
+  <ol>
+    <li>On the adapter: a short press of <kbd>BOOT</kbd> opens the settings; under <b>Standby screen</b>
+      choose <b>Dash</b> (or <b>Both</b>: three minutes of dashboard, two of animation, in turns). After
+      60 s without a touch the screen shows the clock and date, the next meeting and the PC's load -
+      CPU and GPU with temperatures, RAM, VRAM, network and disk, each with the last minute as a
+      sparkline - while <b>uhk-ble-live.exe</b> runs with <b>System stats</b> on (it is, by default).</li>
+    <li>For the reminders, give it your calendar: in Google Calendar open the calendar's settings, copy
+      <b>Secret address in iCal format</b>, then in the icon's menu choose <b>Edit settings</b>, paste the
+      address as the value of <code>"calendar"</code>, save, and <b>Pause</b> / <b>Resume</b>. Any other
+      .ics address, or a file, works the same.</li>
+    <li>Fifteen minutes before a meeting the adapter shows a card with its name and time over whatever
+      is on the screen, and wakes a dark screen for it. Your own meetings and invitations you accepted get a
+      solid card; ones you have not answered a translucent one. Tap <b>✕</b> to dismiss it for today - the
+      program remembers that, so it does not come back after a restart. All-day events, cancelled
+      meetings and invitations you declined are never shown.</li>
+  </ol>
+  <p class="dim">
+    The load goes out as 17 bytes twice a second, the next three meetings of the coming 12 hours once a
+    minute; the calendar is fetched every 5 minutes. GPU figures come from NVIDIA's NVML; other GPUs show
+    "-". Settings and the dismissed list live in <code>%LOCALAPPDATA%\uhk-ble-live</code>.
+  </p>
+
   <h3>Standby animation</h3>
   <ol>
     <li>Drag a <b>GIF</b> or <b>WebP</b> file, or a folder of PNG frames, onto <b>uhk-ble-anim.exe</b>. A
       window shows the upload. It takes a few seconds (~45 KB/s), and the keyboard keeps working.</li>
-    <li>The animation plays after 60 s without a touch, until the next touch or <kbd>BOOT</kbd> press.
-      Typing does not stop it. After 30 minutes the screen goes dark (AMOLED burn-in).</li>
+    <li>The animation plays after 60 s without a touch (<b>Standby screen: Anim</b> in the settings, the
+      default), until the next touch or <kbd>BOOT</kbd> press. Typing does not stop it. After 30 minutes
+      the screen goes dark (AMOLED burn-in).</li>
     <li>Pictures are fitted to the 536 × 240 screen and stored at half resolution with doubled pixels;
       the adapter has 3.4 MB for the animation.</li>
   </ol>

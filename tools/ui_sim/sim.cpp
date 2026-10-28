@@ -8,12 +8,15 @@
 #include "anim.h"
 #include "ble_hid.h"
 #include "bridge.h"
+#include "cal.h"
 #include "config.h"
 #include "display.h"
 #include "live.h"
 #include "log.h"
 #include "ota.h"
+#include "overlay.h"
 #include "stats.h"
+#include "sysmon.h"
 #include "ui.h"
 
 // ---------------- Stubs for what ui.cpp asks the firmware ----------------
@@ -31,6 +34,35 @@ static AnimSettings animSettings = {ANIM_MODE_STANDBY, 60, 180, 1800, 30};
 const AnimSettings &anim_settings() { return animSettings; }
 void anim_set_settings(const AnimSettings &s) { animSettings = s; }
 bool anim_available() { return true; }
+// 14:37 on Wednesday 28 October 2026
+bool anim_clock_now(uint8_t &h, uint8_t &m, uint8_t &s) { h = 14; m = 37; s = 0; return true; }
+bool display_rtc_read_date(uint16_t &y, uint8_t &mo, uint8_t &d) { y = 2026; mo = 10; d = 28; return true; }
+// Calendar: one canned meeting, the reminder switched on by the scene
+static CalEvent meeting;
+static bool     haveMeeting = false, remindNow = false;
+bool cal_has_data() { return haveMeeting; }
+bool cal_next(CalEvent &e) { e = meeting; return haveMeeting; }
+bool cal_reminder(CalEvent &e) { e = meeting; return haveMeeting && remindNow; }
+int32_t cal_minutes_to(const CalEvent &e)
+{
+    int32_t d = (int32_t)(e.startMs - nowMs);
+    return d > 0 ? (d + 59999) / 60000 : -((-d) / 60000);
+}
+void cal_dismiss(uint16_t) {}
+static void setMeeting(uint16_t id, int32_t startInMin, uint16_t durMin, uint8_t flags, const char *title)
+{
+    meeting.id = id;
+    meeting.startMs = nowMs + startInMin * 60000L;
+    meeting.durMin = durMin;
+    meeting.flags = flags;
+    snprintf(meeting.title, sizeof(meeting.title), "%s", title);
+    haveMeeting = true;
+}
+// System load: samples fed by the dashboard scene
+static SysSample sysSample;
+static bool      sysFresh = false;
+bool sysmon_take(SysSample &s) { s = sysSample; bool f = sysFresh; sysFresh = false; return f; }
+bool sysmon_streaming() { return true; }
 void bridge_get_status(BridgeStatus &st) { st = br; }
 void ota_get_status(OtaStatus &st) { st = ota; }
 // 48 213 keys, 6 702 clicks, 1.20 km of mouse
@@ -88,10 +120,21 @@ static void shot(const char *name)
 static uint16_t panel[W * H];
 uint16_t display_width() { return W; }
 uint16_t display_height() { return H; }
-void display_push(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t *px)
+static void rawPanel(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t *px)
 {
     for (int r = 0; r < h; r++)
         memcpy(&panel[(y + r) * W + x], px + r * w, 2 * w);
+}
+void display_push(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t *px)
+{
+    overlay_push(x, y, w, h, px, rawPanel);   // the meeting reminder blends in, like on the adapter
+}
+void display_overlay_show() { overlay_show(rawPanel); }
+void display_fill(uint16_t x, uint16_t y, uint16_t w, uint16_t h)
+{
+    static uint16_t black[W * 16];
+    for (uint16_t yy = y; yy < y + h; yy += 16)
+        display_push(x, yy, w, yy + 16 <= y + h ? 16 : y + h - yy, black);
 }
 
 static void shotPanel(const char *name)
@@ -149,9 +192,10 @@ int main()
     ui_begin({nopSlot, nopVoid, nopVoid, nop});
 
     // Keyboard attached, slots 1-3 paired, slot 3's host connected
-    static const uint8_t hosts[BLE_SLOTS][6] = {{0x3C, 0x22, 0xFB, 0x1A, 0x07, 0x5E},
-                                                {0xD4, 0x61, 0x9D, 0x40, 0xB2, 0x13},
-                                                {0x84, 0x7B, 0x57, 0x2C, 0x9E, 0xA1}};
+    // Made-up addresses (the screenshots are published)
+    static const uint8_t hosts[BLE_SLOTS][6] = {{0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
+                                                {0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB},
+                                                {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF}};
     ble.started = ble.enabled = ble.connected = ble.ready = true;
     ble.mtu = 185;
     ble.interval = 6;
@@ -170,7 +214,7 @@ int main()
     br.agentChannel = true;
     logText = "BLE: HID service up as 37A8:0003, 9 reports, report map 287 bytes + Agent service\n"
               "BLE: waiting for the slot 3 host\n"
-              "BLE: host 84:7B:57:2C:9E:A1 connected\n"
+              "BLE: host AA:BB:CC:DD:EE:FF connected\n"
               "BLE: link encrypted (bonded)\n"
               "BLE: slot 3 host authenticated\n"
               "BLE: MTU 185\n"
@@ -202,7 +246,7 @@ int main()
     logText = "Button GPIO0 held - pairing\n"
               "BLE: slot 4 pairing mode for 20 s\n"
               "BLE: discoverable as \"UHK60 BLE 4\" - pair it on the new device\n"
-              "BLE: host 5A:13:C8:E2:40:7F connected";
+              "BLE: host 11:22:33:44:55:66 connected";
     ui_update(nullptr);
     run(1500);
     shot("screen-passkey");
@@ -228,12 +272,46 @@ int main()
     ui_update(nullptr);
     run(500);
     shot("screen-menu");
-    lv_obj_t *card = lv_obj_get_child(lv_obj_get_child(lv_layer_top(), 1), 0);
+    // sys layer: the menu shade (its card is the shade's child), the rename panel
+    lv_obj_t *card = lv_obj_get_child(lv_obj_get_child(lv_layer_sys(), 0), 0);
     lv_obj_t *rename = lv_obj_get_child(lv_obj_get_child(card, 1), 1);
     lv_event_send(rename, LV_EVENT_CLICKED, nullptr);
     run(300);
     shot("screen-rename");
     ui_close_menu();
+
+    // A confirmed meeting in 12 minutes: the reminder card over the main screen
+    setMeeting(7, 12, 30, CAL_CONFIRMED, "Design review");
+    remindNow = true;
+    ui_reminder_loop(false);
+    ui_update(nullptr);
+    run(300);
+    shot("screen-remind");
+
+    // Dashboard: the standby screen with the clock, the next meeting (42 min
+    // away) and a minute of the PC's load
+    remindNow = false;
+    meeting.startMs = nowMs + 42 * 60000UL;
+    ui_reminder_loop(false);
+    ui_show_dashboard(true);
+    for (int k = 0; k < 60; k++) {
+        float t = k / 59.0f;
+        sysSample.cpu = 18 + 30 * fabsf(sinf(k * 0.35f)) + (k > 40 ? 35 : 0);
+        sysSample.ram = 61 + k / 12;
+        sysSample.gpu = k < 25 ? 4 + (k % 5) : 55 + 30 * fabsf(sinf(k * 0.5f));
+        sysSample.vram = 38 + (k > 25 ? 21 : 0);
+        sysSample.netRx = 120 + 900 * fabsf(sinf(k * 0.22f)) * (k > 30 ? 1 : 0.2f);
+        sysSample.netTx = 40 + 60 * t;
+        sysSample.diskR = k % 17 == 0 ? 42 : 2;
+        sysSample.diskW = k % 11 == 0 ? 18 : 1;
+        sysSample.cpuTemp = 54 + sysSample.cpu / 5;
+        sysSample.gpuTemp = 41 + sysSample.gpu / 3;
+        sysFresh = true;
+        ui_update(nullptr);
+        run(500);
+    }
+    shot("screen-dash");
+    ui_show_dashboard(false);
 
     // Live spectrum: a second of music at 60 fps, the shot ~0.2 s after a kick,
     // so the peak caps float above the falling bars
@@ -244,5 +322,17 @@ int main()
         nowMs += 16;
     }
     shotPanel("screen-live");
+
+    // ... with a tentative meeting's reminder composited over the bars
+    setMeeting(8, 4, 60, CAL_TENTATIVE, "1:1 with Anna");
+    remindNow = true;
+    if (ui_reminder_loop(true))
+        live_redraw();
+    for (int f = 59; f <= 75; f++) {
+        liveFrame(f, 45);
+        live_loop();
+        nowMs += 16;
+    }
+    shotPanel("screen-live-remind");
     return 0;
 }

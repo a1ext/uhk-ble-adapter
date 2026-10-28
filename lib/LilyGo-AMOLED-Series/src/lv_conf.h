@@ -81,7 +81,7 @@
 #define LV_DISP_DEF_REFR_PERIOD 16      /*[ms]*/
 
 /*Input device read period in milliseconds*/
-#define LV_INDEV_DEF_READ_PERIOD 30     /*[ms]*/
+#define LV_INDEV_DEF_READ_PERIOD 10     /*[ms]*/   /* was 30: a dragged finger moved the content at 33 Hz at best */
 
 /*Use a custom tick source that tells the elapsed time in milliseconds.
  *It removes the need to manually update the tick with `lv_tick_inc()`)*/
@@ -111,7 +111,7 @@
 /*Allow buffering some shadow calculation.
 *LV_SHADOW_CACHE_SIZE is the max. shadow size to buffer, where shadow size is `shadow_width + radius`
 *Caching has LV_SHADOW_CACHE_SIZE^2 RAM cost*/
-#define LV_SHADOW_CACHE_SIZE 0
+#define LV_SHADOW_CACHE_SIZE 64   /* was 0: the neon glows were blurred again for every strip (uhk-ble-adapter) */
 
 /* Set number of maximally cached circle data.
 * The circumference of 1/4 circle are saved for anti-aliasing
@@ -152,7 +152,7 @@
  *LV_GRAD_CACHE_DEF_SIZE sets the size of this cache in bytes.
  *If the cache is too small the map will be allocated only while it's required for the drawing.
  *0 mean no caching.*/
-#define LV_GRAD_CACHE_DEF_SIZE 0
+#define LV_GRAD_CACHE_DEF_SIZE 4096   /* was 0: gradients recomputed per strip (uhk-ble-adapter) */
 
 /*Allow dithering the gradients (to achieve visual smooth color gradients on limited color depth display)
  *LV_DITHER_GRADIENT implies allocating one or two more lines of the object's rendering surface
@@ -677,7 +677,7 @@ e.g. "stm32f769xx.h" or "stm32f429xx.h"*/
  *----------*/
 
 /*1: Enable API to take snapshot for object*/
-#define LV_USE_SNAPSHOT 0
+#define LV_USE_SNAPSHOT 1   /* the meeting reminder over the standby animation / live spectrum (ui.cpp) */
 
 /*1: Enable Monkey test*/
 #define LV_USE_MONKEY 0

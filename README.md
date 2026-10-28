@@ -42,6 +42,12 @@ LilyGo T-Display-S3 AMOLED Plus. Hardware and firmware details are in
   an animation uploaded from the PC (no reboot). Or it shows the spectrum of
   whatever the PC is playing, streamed live. Their brightness follows the time
   of day. See [Screen animations](#screen-animations).
+- **Dashboard and meeting reminders.** The standby screen can instead show
+  the clock, your next meeting and the PC's load (CPU, RAM, GPU, VRAM,
+  network, disk) with a minute of history. Fifteen minutes before a meeting a
+  card with its name and time appears over whatever is on the screen - the
+  main screen, the animation or the spectrum - with an ✕ to dismiss it. See
+  [Dashboard and meeting reminders](#dashboard-and-meeting-reminders).
 
 <table>
   <tr>
@@ -53,6 +59,33 @@ LilyGo T-Display-S3 AMOLED Plus. Hardware and firmware details are in
     <td align="center">UHK Agent asks before touching the config</td>
   </tr>
 </table>
+
+## Using the screen
+
+Everything the adapter does by touch or with its one button (BOOT, at the
+bottom of the case):
+
+| Where | Do | What happens |
+|---|---|---|
+| Anywhere | Hold **BOOT** 1.5 s | Pairing mode for the active slot (a pink→blue bar shows the hold) |
+| Anywhere | Press **BOOT** while pairing | Cancels pairing |
+| Main screen | Short press of **BOOT** | Opens / closes the settings menu |
+| Main screen | Tap a slot pad (S1–S5) | Switches the keyboard to that host |
+| Main screen | Tap the active slot's pad | Opens the settings menu |
+| Main screen | Hold **Pair** 1.5 s | Pairing mode; a tap on it during pairing cancels |
+| Main screen | Tap **Agent open N min** | Locks UHK Agent out of the configuration again |
+| Pop-up | **Allow** / **Deny** | UHK Agent's request for config access (30 s to answer) |
+| Settings menu | **Rename** | On-screen keyboard for the host's name: OK saves, the keyboard key cancels |
+| Settings menu | **Off / Anim / Dash / Both** | What the screen shows after 60 s without a touch |
+| Settings menu | **Day / Night** sliders | Brightness of the standby screen and the spectrum |
+| Settings menu | **✕** or **BOOT** | Closes it (it also closes by itself after 60 s); the menu scrolls down |
+| Reminder card | Tap **✕** | Dismisses that meeting for today - over the animation, the spectrum and the dashboard too |
+| Dark screen, dashboard, animation, spectrum | Any other touch, or **BOOT** | Back to the main screen; nothing underneath is tapped (the spectrum returns after 30 s) |
+
+Typing on the keyboard is not a touch: it neither wakes the screen nor ends
+the standby screen. The screen dims after a minute without a touch and goes
+dark after three when no standby screen is chosen; a standby screen goes dark
+after 30 minutes.
 
 ## Screen animations
 
@@ -77,7 +110,8 @@ step-by-step instructions, or from a release. CI builds them from the same
 commit as the firmware.
 
 **From the sources:** Python with `pip install bleak numpy pillow`, plus
-`soundcard` for the live spectrum.
+`soundcard` for the live spectrum, `psutil` (and `nvidia-ml-py`) for the
+system stats, `icalendar recurring-ical-events` for the meeting reminders.
 
 Only one tool can use the adapter at a time. Pause the live spectrum before an
 upload or a firmware update, otherwise the tool reports that the adapter is
@@ -103,8 +137,8 @@ python tools/ble_anim.py info                 # what is stored, settings, the ad
   what the adapter will play.
 - Settings (unset options keep their value):
   `python tools/ble_anim.py set --delay 120 --off-after 3600 --mode off`.
-  The on/off switch and the day / night brightness are also in the
-  adapter's settings menu (a short press of BOOT).
+  The standby choice (Off / Anim / Dash / Both) and the day / night
+  brightness are also in the adapter's settings menu (a short press of BOOT).
 - `uhk-ble-anim.exe` takes the same commands. A GIF / WebP file or a folder
   dropped on it is uploaded. Started without a terminal, it waits for Enter
   before its window closes.
@@ -119,7 +153,10 @@ Or without Python on the PC: **`uhk-ble-live.exe`**, a single file that runs as
 a tray icon, with no console window.
 - Double-click it to start; auto-gain is on.
 - The icon's menu shows the status and has Pause / Resume (also a left
-  click), Auto gain, Open log and Exit.
+  click), the switches Audio spectrum / System stats / Calendar reminders,
+  Auto gain, Edit settings (`config.json`, where the calendar URL goes),
+  Open log and Exit. A switch restarts the stream; an edited settings file is
+  read at the next Pause / Resume.
 - The icon is grey while no adapter is reachable (another slot selected,
   switched off). The app keeps reconnecting every 10 s.
 - Command-line options are the same as for `ble_live.py`. The log is at
@@ -145,6 +182,48 @@ and writes `dist/uhk-ble-live.exe` (~30 MB) and `dist/uhk-ble-anim.exe`
   `--test` (a sweep, no audio needed), `--brightness N` (fixed instead of by
   the time of day).
 
+### Dashboard and meeting reminders
+
+<table>
+  <tr>
+    <td><img src="docs/img/screen-dash.png" width="400" alt="Dashboard: the next meeting along the top, a large clock with the date, and six tiles - CPU, RAM, GPU, VRAM, NET, DISK - each with a sparkline of the last minute"></td>
+    <td><img src="docs/img/screen-live-remind.png" width="400" alt="The live spectrum with a translucent reminder card over it: in 4 min, 1:1 with Anna, 14:41 - 15:41, and an X button"></td>
+  </tr>
+  <tr>
+    <td align="center">Dashboard (standby screen)</td>
+    <td align="center">A reminder over the spectrum (tentative = translucent)</td>
+  </tr>
+</table>
+
+Both are fed by the same PC tool as the spectrum - `uhk-ble-live.exe` or
+`python tools/ble_live.py` - over the one Bluetooth link.
+
+**Dashboard.** Settings menu → Standby screen → **Dash**, or **Both** for
+three minutes of dashboard and two of animation in turns (`ble_anim.py set
+--mode 2` / `3` does the same from the PC). After 60 s without a touch it
+shows the clock and date (the board's RTC, set by the PC tools), the next
+meeting, and the PC's load: CPU and GPU with their temperatures, RAM and VRAM
+in percent, network and disk rates, each with the last minute as a sparkline.
+The load comes as 17 bytes twice a second while the tool runs ("System stats"
+in the tray menu, `--no-stats` to leave it out); without it the tiles stay dim
+and the clock remains. GPU: NVIDIA through NVML on Windows and Linux, Apple
+Silicon through `ioreg` on a Mac, otherwise "-".
+
+**Meeting reminders.** Give the tool your calendar: in Google Calendar open
+the calendar's settings and copy *Secret address in iCal format* into
+`calendar` in the settings file (tray menu → **Edit settings**, then Pause /
+Resume), or pass `--calendar URL` on the command line; any other `.ics` URL or
+a local file works the same. The tool reads it every 5 minutes and sends the
+next three meetings of the coming 12 hours (all-day events, cancelled ones and
+invitations you declined are left out). Fifteen minutes before a meeting the
+adapter shows a card - "in 12 min · Design review · 14:49 - 15:19" - over the
+main screen, the dashboard, the animation or the spectrum, waking a dark
+screen for it; it stays until 5 minutes after the start. A meeting you
+accepted (or your own) gets a solid card with an amber border; one you have
+not answered, or marked tentative, a translucent one. **✕** dismisses the
+meeting for the rest of the day: the adapter tells the tool, which remembers
+it in `dismissed.json`, so a restart does not bring it back.
+
 ### Brightness by the time of day
 
 The animation and the spectrum are dimmer at night and brighter by day:
@@ -163,17 +242,34 @@ been set, the day level is used.
 
 ### Linux and macOS
 
-The tools use Windows' own Bluetooth connection to the paired adapter (WinRT,
-via the projections that `bleak` installs). The adapter does not advertise
-while its host is connected, so there is nothing to scan for. Porting would
-mean:
-- **Bluetooth:** Linux (BlueZ) lets an app use the GATT services of a device
-  the system is already connected to, so `bleak` can do it there. macOS needs
-  CoreBluetooth's `retrieveConnectedPeripheralsWithServices`, which `bleak`
-  does not expose.
-- **Audio capture:** `soundcard` records the output's monitor source on Linux
-  (PulseAudio / PipeWire). macOS has no loopback; a virtual device such as
-  BlackHole is needed.
+On Windows the tools use Windows' own Bluetooth connection to the paired
+adapter (WinRT). Elsewhere the same scripts go through
+[bleak](https://github.com/hbldh/bleak):
+
+```bash
+pip install bleak numpy soundcard psutil icalendar recurring-ical-events nvidia-ml-py
+python tools/ble_live.py --agc                  # spectrum + system stats
+python tools/ble_live.py --no-audio --calendar 'https://calendar.google.com/calendar/ical/.../basic.ics'
+python tools/ble_anim.py upload demo:matrix     # animations, firmware updates (ble_ota.py) too
+```
+
+- **Linux (BlueZ):** pair the adapter once with `bluetoothctl` (`scan on`
+  while the adapter is in pairing mode, `pair <address>`, type the code from
+  the screen, `trust <address>`). The tools find the paired adapter by name
+  (`bluetoothctl devices Paired`) and use the connection BlueZ already has, so
+  nothing needs to advertise. The spectrum captures the output's monitor source
+  (PulseAudio / PipeWire). In the background:
+  `systemd-run --user --unit uhk-ble-live python tools/ble_live.py --agc`, or
+  a user service with that command and `Restart=always`.
+- **macOS:** CoreBluetooth hands bleak only devices it has seen advertising,
+  and the adapter advertises only while its host is away. Start a tool right
+  after the adapter restarts (the Mac reconnects within seconds, the scan of
+  the first run catches the advertisement), note the identifier it prints and
+  pass it with `--address` from then on. macOS has no audio loopback: a
+  virtual device such as BlackHole as `--device`, or `--no-audio` for the
+  stats and reminders only.
+
+Both are untested here - the Windows PC is the daily one.
 
 ## Build
 

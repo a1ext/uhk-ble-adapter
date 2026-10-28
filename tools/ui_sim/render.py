@@ -25,7 +25,8 @@ from PIL import Image, ImageDraw
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 W, H = 536, 240
-SCREENSHOTS = ["screen-bt", "screen-passkey", "screen-agent", "screen-menu", "screen-rename", "screen-live"]
+SCREENSHOTS = ["screen-bt", "screen-passkey", "screen-agent", "screen-menu", "screen-rename", "screen-live",
+               "screen-remind", "screen-dash", "screen-live-remind"]
 FRAMES = ["anim-spark", "anim-pop"]
 
 
@@ -90,9 +91,11 @@ def main():
     stamp = ["-Wno-builtin-macro-redefined", f'-D__DATE__="{date}"', f'-D__TIME__="{time}"']
     run([cxx, "-std=gnu++17", *flags, *stamp, "-c", str(ROOT / "src" / "ui.cpp"), "-o", str(build / "ui.o")])
     run([cxx, "-std=gnu++17", *flags, "-c", str(ROOT / "src" / "live.cpp"), "-o", str(build / "live.o")])
+    run([cxx, "-std=gnu++17", *flags, "-c", str(ROOT / "src" / "overlay.cpp"), "-o", str(build / "overlay.o")])
     run([cxx, "-std=gnu++17", *flags, "-c", str(HERE / "sim.cpp"), "-o", str(build / "sim.o")])
     exe = build / ("uisim.exe" if os.name == "nt" else "uisim")
-    run([cxx, "-o", str(exe), str(build / "sim.o"), str(build / "ui.o"), str(build / "live.o"), *map(str, objs)])
+    run([cxx, "-o", str(exe), str(build / "sim.o"), str(build / "ui.o"), str(build / "live.o"),
+         str(build / "overlay.o"), *map(str, objs)])
     run([str(exe)], cwd=build)
 
     args.out.mkdir(parents=True, exist_ok=True)

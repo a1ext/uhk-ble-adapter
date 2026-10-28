@@ -8,10 +8,12 @@
 #include <mbedtls/sha256.h>
 #include "anim.h"
 #include "ble_hid.h"
+#include "cal.h"
 #include "config.h"
 #include "live.h"
 #include "log.h"
 #include "stats.h"
+#include "sysmon.h"
 
 // Arduino core hook: do not auto-confirm a freshly updated image at boot,
 // ota_loop() confirms it once the firmware has proven itself
@@ -68,6 +70,10 @@ class CtrlCallbacks : public BLECharacteristicCallbacks {
         std::string v = c->getValue();
         Req r{};
         uint8_t op = v.empty() ? 0 : (uint8_t)v[0];
+        if (op == 0x15) {               // the next meetings (cal.h)
+            cal_packet((const uint8_t *)v.data(), v.size());
+            return;
+        }
         if (op >= 0x10 && op <= 0x1F) { // standby animation control
             anim_command((const uint8_t *)v.data(), v.size());
             return;
@@ -91,8 +97,11 @@ class DataCallbacks : public BLECharacteristicCallbacks {
         if (!ble_hid_ready())
             return;
         std::string v = c->getValue();
-        if (!active) { // no transfer: live spectrum packets (live.h)
-            live_packet((const uint8_t *)v.data(), v.size());
+        if (!active) { // no transfer: live spectrum (live.h) / system load (sysmon.h) packets
+            if (v.size() > 2 && v[0] == 'S' && v[1] == 'Y')
+                sysmon_packet((const uint8_t *)v.data(), v.size());
+            else
+                live_packet((const uint8_t *)v.data(), v.size());
             return;
         }
         // The host keeps its window below the buffer size; no room = it did not

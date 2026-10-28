@@ -189,7 +189,7 @@ static const DisplayConfigure_t RM67162_AMOLED_SPI  = {
     9, //BOARD_DISP_TE,
     8, //command bit
     24,//address bit
-    40000000,
+    80000000,   // was 40 MHz: a full screen took 51 ms, scrolling crawled (uhk-ble-adapter)
     (lcd_cmd_t *)rm67162_spi_cmd,
     RM67162_INIT_SPI_SEQUENCE_LENGTH,
     RM67162_WIDTH,//width

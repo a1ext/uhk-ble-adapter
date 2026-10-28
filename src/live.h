@@ -28,3 +28,4 @@ void live_start();                                  // takes over the panel (cle
 void live_stop();                                   // gives the panel back to LVGL (full redraw)
 bool live_active();
 void live_loop();                                   // Arduino loop: draws while active
+void live_redraw();                                 // clear and draw every bar again (the overlay changed)

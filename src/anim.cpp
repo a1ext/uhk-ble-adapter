@@ -249,6 +249,21 @@ uint8_t anim_brightness_now()
     return max<uint8_t>(1, lroundf(255.0f * powf(pn + (pd - pn) * day, 2.2f)));
 }
 
+bool anim_clock_now(uint8_t &hour, uint8_t &minute, uint8_t &second)
+{
+    uint32_t sod = secondsOfDay();
+    hour = sod / 3600;
+    minute = sod / 60 % 60;
+    second = sod % 60;
+    return clockValid;
+}
+
+void anim_redraw()
+{
+    if (playing)
+        pushFrame();
+}
+
 // ---------------- Settings / commands ----------------
 static void saveSettings()
 {
@@ -264,8 +279,9 @@ static void saveSettings()
 
 static void logSettings()
 {
+    static const char *const modes[] = {"off", "animation", "dashboard", "dashboard + animation"};
     logf("Anim: standby %s after %u s, brightness %u / night %u, off after %u s",
-         settings.mode ? "animation" : "off", settings.delayS, settings.brightness,
+         modes[min<uint8_t>(settings.mode, ANIM_MODE_BOTH)], settings.delayS, settings.brightness,
          settings.nightBrightness, settings.offAfterS);
 }
 
@@ -302,7 +318,7 @@ static AnimEvent handle(const Cmd &c)
         return ANIM_EV_STOP;
     case 0x12:
         if (c.len >= 7) {
-            settings.mode = c.data[1] ? ANIM_MODE_STANDBY : ANIM_MODE_OFF;
+            settings.mode = min<uint8_t>(c.data[1], ANIM_MODE_BOTH);
             settings.delayS = max<uint16_t>(5, c.data[2] | c.data[3] << 8);
             settings.brightness = max<uint8_t>(1, c.data[4]);
             settings.offAfterS = c.data[5] | c.data[6] << 8;

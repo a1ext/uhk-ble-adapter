@@ -1,10 +1,14 @@
-"""Tray app of the live spectrum (dist/uhk-ble-live.exe, tools/build_live_exe.py):
-no console window, an icon in the notification area.
+"""Tray app of the adapter's PC side (dist/uhk-ble-live.exe, tools/build_exe.py):
+the live spectrum, the system stats and the calendar reminders of
+tools/ble_live.py, no console window, an icon in the notification area.
 
-Menu: status, Pause / Resume (also a left click), Auto gain, Exit. When the
-adapter is gone (another slot selected, out of range, off) the icon turns grey
-and it reconnects every 10 s. Arguments are those of tools/ble_live.py (auto
-gain on by default). Log: %LOCALAPPDATA%/uhk-ble-live/live.log.
+Menu: status, Pause / Resume (also a left click), the three feature switches,
+Auto gain, Edit settings (config.json: the calendar URL goes there), Open log,
+Exit. Switches are saved and restart the stream; an edited settings file is
+read at the next (re)start (Pause / Resume). When the adapter is gone (another
+slot selected, out of range, off) the icon turns grey and it reconnects every
+10 s. Arguments are those of tools/ble_live.py. Files in
+%LOCALAPPDATA%/uhk-ble-live: live.log, config.json, dismissed.json.
 """
 import asyncio
 import ctypes
@@ -75,6 +79,7 @@ class Streamer:
 
         while True:
             self.set("Connecting to the adapter...", False)
+            ble_live.apply_config(self.args)     # edited settings take effect at the next (re)start
             try:
                 await ble_live.run(self.args, on_state)
             except asyncio.CancelledError:
@@ -121,7 +126,7 @@ def main():
     import pystray
 
     argv = sys.argv[1:]
-    args = ble_live.parse_args(argv if "--agc" in argv else argv + ["--agc"])   # off in the menu
+    args = ble_live.parse_args(argv)         # the feature switches come from the settings file
     icons = {True: live_icon.make(True, 64), False: live_icon.make(False, 64)}
     icon = pystray.Icon("uhk-ble-live", icons[False], APP)
 
@@ -143,6 +148,7 @@ def main():
 
     def toggle_agc(_icon, _item):
         args.agc = not args.agc
+        ble_live.save_config(agc=args.agc)
         if getattr(args, "analyzer", None):
             args.analyzer.agc = args.agc
 
@@ -154,11 +160,38 @@ def main():
         if log:
             os.startfile(log)
 
+    def restart():
+        if not streamer.paused:
+            streamer.stop()
+            streamer.start()
+
+    def toggle(key):                         # a feature switch: saved, the stream restarts
+        def handler(_icon, _item):
+            setattr(args, key, not getattr(args, key))
+            ble_live.save_config(**{key: getattr(args, key)})
+            restart()
+            refresh()
+        return handler
+
+    def open_settings(_icon, _item):
+        os.startfile(ble_live.save_config())   # written with the defaults when there is none yet
+
+    def calendar_item(_icon, _item):
+        if args.calendar:
+            toggle("calendar_on")(_icon, _item)
+        else:                                # no URL yet: the settings file is where it goes
+            open_settings(_icon, _item)
+
     icon.menu = pystray.Menu(
         pystray.MenuItem(lambda _: "Paused" if streamer.paused else streamer.status, None, enabled=False),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(lambda _: "Resume" if streamer.paused else "Pause", toggle_pause, default=True),
+        pystray.MenuItem("Audio spectrum", toggle("audio"), checked=lambda _: args.audio),
         pystray.MenuItem("Auto gain", toggle_agc, checked=lambda _: args.agc),
+        pystray.MenuItem("System stats", toggle("stats"), checked=lambda _: args.stats),
+        pystray.MenuItem(lambda _: "Calendar reminders" if args.calendar else "Calendar reminders (set the URL)",
+                         calendar_item, checked=lambda _: bool(args.calendar) and args.calendar_on),
+        pystray.MenuItem("Edit settings", open_settings),
         pystray.MenuItem("Open log", open_log, visible=log is not None),
         pystray.MenuItem("Exit", quit_app),
     )

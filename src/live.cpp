@@ -256,6 +256,15 @@ bool live_active()
     return active;
 }
 
+void live_redraw()
+{
+    if (!active)
+        return;
+    clearScreen();
+    for (uint8_t b = 0; b < nBands; b++)
+        bars[b].drawnH = bars[b].drawnPeak = bars[b].drawnRefl = 0;
+}
+
 void live_loop()
 {
     if (!active)

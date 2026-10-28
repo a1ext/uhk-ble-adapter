@@ -21,7 +21,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 VENV = ROOT / ".venv-build"
 WORK = ROOT / ".pio" / "pyinstaller"
-PACKAGES = ["pyinstaller", "bleak", "soundcard", "numpy", "pystray", "pillow"]
+PACKAGES = ["pyinstaller", "bleak", "soundcard", "numpy", "pystray", "pillow",
+            "psutil", "nvidia-ml-py", "icalendar", "recurring-ical-events"]   # system stats, calendar
 
 sys.path.insert(0, str(ROOT / "tools"))
 import live_icon  # noqa: E402
@@ -30,6 +31,7 @@ TARGETS = {
     "live": ["--windowed", "--name", "uhk-ble-live",
              "--hidden-import", "pystray._win32",     # pystray picks its backend at run time
              "--collect-data", "soundcard",           # its cffi headers (mediafoundation.py.h)
+             "--collect-data", "tzdata",              # time zones of the ICS calendar
              ROOT / "tools" / "live_tray.py"],
     "anim": ["--console", "--name", "uhk-ble-anim",
              "--hidden-import", "anim_demos",         # imported for demo:<name> only

@@ -11,6 +11,7 @@
 #include "anim.h"
 #include "ble_hid.h"
 #include "bridge.h"
+#include "cal.h"
 #include "config.h"
 #include "display.h"
 #include "live.h"
@@ -24,6 +25,9 @@ static uint32_t    lastActivityMs = 0;
 static uint8_t     screenLevel = DISPLAY_BRIGHTNESS; // where the brightness is heading
 static bool        standbyDone = false;  // the standby animation ran its course until the next activity
 static bool        animByCommand = false; // started by the computer, not by idling
+static uint32_t    standbySinceMs = 0;    // the standby screen (animation / dashboard) began
+static uint32_t    standbyPhaseMs = 0;    // ... and its current half of "both"
+static const uint32_t STANDBY_DASH_MS = 3 * 60 * 1000UL, STANDBY_ANIM_MS = 2 * 60 * 1000UL;
 static uint32_t    liveSuppressUntil = 0; // the live spectrum waits after the user took the screen
 static const uint32_t LIVE_RESUME_MS = 30000;
 
@@ -36,7 +40,7 @@ static bool panelTaken()
 // The screen shows nothing the user could act on: a press or touch only wakes it
 static bool screenAsleep()
 {
-    return screenLevel == 0 || display_brightness() == 0 || panelTaken();
+    return screenLevel == 0 || display_brightness() == 0 || panelTaken() || ui_dashboard_shown();
 }
 
 static void wakeScreen()
@@ -46,6 +50,7 @@ static void wakeScreen()
         liveSuppressUntil = millis() + LIVE_RESUME_MS;
     }
     anim_stop();
+    ui_show_dashboard(false);
     standbyDone = false;
     lastActivityMs = millis();
     screenLevel = DISPLAY_BRIGHTNESS;
@@ -152,20 +157,26 @@ static lv_indev_t *touchIndev()
 // for a touch that stops the standby animation.
 static void pollTouch()
 {
-    static bool swallowing = false;
+    static bool swallowing = false, dismissing = false;
     int16_t x, y;
     bool touched = display_get_touch(&x, &y);
     if (touched) {
-        if (screenAsleep() && !swallowing) {
-            swallowing = true;
-            if (lv_indev_t *in = touchIndev()) {
-                lv_indev_reset(in, nullptr);
-                lv_indev_enable(in, false);
+        if (!swallowing) {
+            // The "X" of the meeting reminder over a standby screen dismisses it, nothing else
+            dismissing = display_brightness() > 0 && (panelTaken() || ui_dashboard_shown())
+                      && ui_reminder_touch(x, y);
+            if (dismissing || screenAsleep()) {
+                swallowing = true;
+                if (lv_indev_t *in = touchIndev()) {
+                    lv_indev_reset(in, nullptr);
+                    lv_indev_enable(in, false);
+                }
             }
         }
-        wakeScreen();
+        if (!dismissing)
+            wakeScreen();
     } else if (swallowing) {
-        swallowing = false;
+        swallowing = dismissing = false;
         if (lv_indev_t *in = touchIndev())
             lv_indev_enable(in, true);
     }
@@ -214,22 +225,40 @@ static void updateScreenPower()
         ui_close_menu();
     }
     const AnimSettings &as = anim_settings();
-    if (anim_playing()) {
-        // Burn-in protection still applies to a standby animation left running
-        if (!animByCommand && as.offAfterS && anim_played_ms() > as.offAfterS * 1000UL) {
+    if (anim_playing() || ui_dashboard_shown()) {
+        // Burn-in protection still applies to a standby screen left running
+        if (!animByCommand && as.offAfterS && millis() - standbySinceMs > as.offAfterS * 1000UL) {
             anim_stop();
+            ui_show_dashboard(false);
             standbyDone = true;
             screenLevel = 0;
             display_fade_to(0, SCREEN_FADE_MS);
-        } else {
-            followDaylight(anim_brightness_now());
+            return;
+        }
+        followDaylight(anim_brightness_now());
+        // "Both": the dashboard and the animation take turns
+        if (!animByCommand && as.mode == ANIM_MODE_BOTH && anim_available()
+            && millis() - standbyPhaseMs > (anim_playing() ? STANDBY_ANIM_MS : STANDBY_DASH_MS)) {
+            standbyPhaseMs = millis();
+            if (anim_playing()) {
+                anim_stop();
+                ui_show_dashboard(true);
+            } else {
+                ui_show_dashboard(false);
+                anim_start();
+            }
         }
         return;
     }
-    if (as.mode == ANIM_MODE_STANDBY && anim_available() && !standbyDone && screenLevel > 0
-        && idle > as.delayS * 1000UL) {
+    bool wantDash = as.mode == ANIM_MODE_DASHBOARD || as.mode == ANIM_MODE_BOTH;
+    bool wantAnim = as.mode == ANIM_MODE_STANDBY && anim_available();
+    if ((wantDash || wantAnim) && !standbyDone && screenLevel > 0 && idle > as.delayS * 1000UL) {
         animByCommand = false;
-        anim_start();
+        standbySinceMs = standbyPhaseMs = millis();
+        if (wantDash)
+            ui_show_dashboard(true);
+        else
+            anim_start();
         screenLevel = anim_brightness_now();
         display_set_brightness(screenLevel);
         return;
@@ -317,6 +346,18 @@ void loop()
     uint32_t now = millis();
     if (now >= nextUiMs) {
         nextUiMs = now + 100;
+        // Meeting reminder: composited into the standby animation / spectrum
+        // while they own the panel; a dark screen wakes up for a new one
+        if (ui_reminder_loop(panelTaken())) {
+            live_redraw();
+            anim_redraw();
+        }
+        static bool reminded = false;
+        CalEvent ev;
+        bool remind = cal_reminder(ev);
+        if (remind && !reminded && screenLevel == 0)
+            wakeScreen();
+        reminded = remind;
         updateScreenPower();
         if (!panelTaken())
             ui_update(bootNote);

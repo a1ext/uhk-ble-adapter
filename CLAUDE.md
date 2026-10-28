@@ -191,7 +191,9 @@ pin (USB port or charger).
   player stops, the partition is written, SHA-256 + header/index checked, then reloaded.
   OTA control commands 0x10 play / 0x11 stop / 0x12 settings / 0x13 info (NVS "anim":
   mode, delay, brightness, off-after; default standby after 60 s idle, brightness 80, screen
-  off after 30 min of animation). Touch stops it (the touch is swallowed); keyboard typing
+  off after 30 min of animation; mode 0 off / 1 animation / 2 dashboard / 3 both in turns,
+  3 min dashboard then 2 min animation, `main.cpp` standby logic). Touch stops it (the
+  touch is swallowed); keyboard typing
   does not count as activity. PC side: `tools/ble_anim.py` (make / preview / upload / play /
   stop / info / set; input = `demo:<name>` from `tools/anim_demos.py`, GIF / WebP / PNG
   folder, or .uanm), encoder `tools/uanm.py`, shared WinRT link `tools/ble_link.py`
@@ -230,6 +232,41 @@ pin (USB port or charger).
   = the board's PCF85063 RTC (I2C 0x51), backed by a rechargeable MS412FE cell (U8, charged
   from 3V3 via D9 — it keeps time without power); `ble_link.py` sets local time (OTA control
   command 0x14) on every connection. RTC OS flag set = not valid → day level.
+- `src/sysmon.*` + the dashboard in `ui.cpp`: "SY" packets on the DATA characteristic
+  (17 B, 2/s: cpu / ram / gpu / vram %, net rx / tx KB/s, disk r / w in 100 KB/s, cpu / gpu
+  temperature; 0xFF = n/a) from `tools/sysstats.py` (psutil; NVML via nvidia-ml-py; ioreg
+  on a Mac). Standby mode 2 "Dashboard" = an LVGL screen loaded instead of the main one
+  (`ui_show_dashboard`): next-meeting line, clock 48 px + date (RTC date via
+  `display_rtc_read_date`, read every 30 s), 6 tiles with 60-sample lv_chart sparklines
+  (ext y arrays, rate tiles autoscale). Values go dim 5 s after the last packet.
+- `src/cal.*` — meetings from the PC: CTRL command 0x15 n × {id u16, start_in_min i16,
+  dur_min u16, flags u8 (1 confirmed / 2 tentative), len u8, title ≤ 24 ASCII}. Times are
+  relative minutes counted with millis(), so the adapter needs no date / time zone; the
+  list is dropped 2 h after the last packet. Reminder = a top-layer card (`remindCard`,
+  over the title row) from 15 min before to 5 min after the start: "in N min · title ·
+  15:00 - 15:30 · ✕"; confirmed = opaque with an amber border, tentative = 60 % opacity.
+  ✕ → `cal_dismiss()` → notification 0x20 <id u16>; the PC drops the meeting for the day
+  (`dismissed.json`). A dark screen wakes up for a new reminder. Over the standby
+  animation / live spectrum (LVGL paused) the card is an `lv_snapshot` (TRUE_COLOR_ALPHA,
+  `LV_USE_SNAPSHOT 1` in the vendored lv_conf) handed to `src/overlay.*`, which blends it
+  into every `display_push()` window that meets its rectangle (scratch copy, per-pixel
+  alpha; the simulator's `display_push` does the same); `ui_reminder_loop()` returns true
+  when the overlay was set / cleared and main.cpp then calls `live_redraw()` /
+  `anim_redraw()`. A touch on the ✕ while LVGL gets no input (`ui_reminder_touch()` in
+  pollTouch) dismisses without waking the screen.
+- PC side of the dashboard / reminders: `tools/ble_live.py` is the one process (one GATT
+  session) with tasks for the spectrum, `sysstats.py` (every 0.5 s) and `calendar_ics.py`
+  (ICS URL / file — Google's "secret address in iCal format"; icalendar +
+  recurring-ical-events; the next 3 meetings within 12 h; all-day / declined / cancelled
+  skipped; the PARTSTAT of the attendee matching X-WR-CALNAME decides confirmed vs
+  tentative; fetched every 5 min, the packet sent whenever it changes). Settings in
+  `config.json` (`%LOCALAPPDATA%\uhk-ble-live` or `~/.config/uhk-ble-live`: audio, stats,
+  calendar URL, calendar_on, agc); the tray menu switches write it and restart the stream,
+  an edited file is read at the next (re)start. `ble_link.py` = `LinkBase` (commands,
+  uploads, notification `listeners`) + `WinRtLink`; `ble_link_bleak.py` (`BleakLink`:
+  Linux finds the paired adapter with `bluetoothctl devices Paired`, macOS needs
+  `--address`) is picked automatically off Windows.
+- Every touch / button interaction is listed in README "Using the screen": keep it in sync.
 - **Do not change the GATT attribute table** (adding a characteristic to the OTA service
   broke it, 2026-10-27): Windows caches the table of a bonded device; after the change
   uncached characteristic discovery of that service threw "device does not recognize the
@@ -249,7 +286,22 @@ pin (USB port or charger).
   (keys | clicks | mouse distance); slot line +
   "Pair" button (hold 1.5 s = pairing mode, tap during pairing = cancel, countdown shown);
   status lines, log tail. Pop-up cards on the top layer: pairing passkey, UHK Agent "allow
-  config access?", settings menu.
+  config access?", meeting reminder; the settings menu and the rename panel are on the SYS
+  layer: under an opaque full-screen object there LVGL skips the screen and the top layer
+  (`lv_refr_get_top_obj` is applied to the sys layer only) — on the top layer every menu
+  frame redrew the main screen's neon glows beneath (107 ms/frame).
+  - Display driver (vendored `lib/LilyGo-AMOLED-Series`): the Plus' 1-bit SPI runs at
+    80 MHz (`RM67162_AMOLED_SPI.freq`, was 40: a full screen took 51 ms; the panel takes
+    it), blocking Arduino `SPIClass::writeBytes`, one full-screen LVGL buffer in PSRAM.
+    `LV_SHADOW_CACHE_SIZE 64`, `LV_GRAD_CACHE_DEF_SIZE 4096`, `LV_INDEV_DEF_READ_PERIOD 10`.
+    Measured with LVGL's monitor_cb: the menu scroll was 85–107 ms/frame for ~100 kpx,
+    i.e. render-bound, not bus-bound. A DMA attempt (2026-10-29: IDF `spi_master`, two
+    32-row strips in internal RAM, bounce buffers for PSRAM pushes) was reverted: it ran,
+    but after every `esp_restart()` from the DMA firmware the next boot's SPI transfers
+    never reached the panel (black screen, loop hung or crawled on timeouts; a hard reset
+    recovered it; `periph_module_reset` of SPI3 / GDMA at init did not help). Assigning
+    `monitor_cb` was also present in the hung builds — not separated out. Next step if
+    retried: UART0 boot log, or a trace of the previous run in RTC_NOINIT memory.
   - Settings menu (`ui_open_menu()`): a short press of BOOT (released before the 1.5 s
     hold, not while pairing; a press that woke a dark screen / stopped the animation only
     wakes it), or a SHORT_CLICKED on the already active slot's pad. Contents:
@@ -257,11 +309,11 @@ pin (USB port or charger).
       the keyboard key cancels, "" = no name);
     - the standby animation switch (`AnimSettings::mode`);
     - day / night brightness sliders (saved on release, `anim_set_settings()`).
-    A tap beside the card, ✕ or BOOT closes it, and it closes by itself after 60 s idle
+    Full screen, scrolls down (finger-sized controls). ✕ or BOOT closes it, and it closes by itself after 60 s idle
     (`SCREEN_DIM_MS`). While it is open no standby animation or live spectrum starts;
     starting pairing closes it.
   - Host names: `ble_hid_set_host_name()`, NVS "bleslots" keys n0..n4, at most
-    `BLE_HOST_NAME_MAX` (20) ASCII characters. Shown on the slot line and in "waiting
+    `BLE_HOST_NAME_MAX` (20) ASCII characters. Shown in the title (amber) and in "waiting
     for <name>". Cleared when another host pairs on the slot or on forget-all; a host
     that moves to another slot takes its name along.
   README / Pages screenshots (`docs/img/screen-*.png`) are rendered from

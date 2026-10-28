@@ -24,3 +24,15 @@ void ui_update(const char *bootNote);
 void ui_open_menu();
 void ui_close_menu();
 bool ui_menu_open();
+// Dashboard: the standby screen with the clock, the next meeting (cal.h) and
+// the computer's load (sysmon.h), loaded instead of the main screen
+void ui_show_dashboard(bool on);
+bool ui_dashboard_shown();
+// Meeting reminder card (cal.h), on the top layer of the LVGL screens. While
+// the standby animation / live spectrum own the panel (panelTaken) a snapshot
+// of it goes to the overlay compositor (overlay.h). Called every 100 ms;
+// returns true when the overlay was set or cleared: the panel's owner repaints
+bool ui_reminder_loop(bool panelTaken);
+// A touch at x, y while LVGL gets no input: true = it hit the card's "X" (the
+// meeting is dismissed, nothing else should happen)
+bool ui_reminder_touch(int16_t x, int16_t y);
