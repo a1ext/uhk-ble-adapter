@@ -30,7 +30,7 @@ static const char *logText = "";
 
 void ble_hid_get_status(BleHidStatus &st) { st = ble; }
 void ble_hid_set_host_name(uint8_t slot, const char *name) { strcpy(ble.slotName[slot], name); }
-static AnimSettings animSettings = {ANIM_MODE_STANDBY, 60, 180, 1800, 30};
+static AnimSettings animSettings = {ANIM_MODE_STANDBY, 60, 180, 1800, 30, true, 60};
 const AnimSettings &anim_settings() { return animSettings; }
 void anim_set_settings(const AnimSettings &s) { animSettings = s; }
 bool anim_available() { return true; }
@@ -64,6 +64,7 @@ static bool      sysFresh = false;
 bool sysmon_take(SysSample &s) { s = sysSample; bool f = sysFresh; sysFresh = false; return f; }
 bool sysmon_streaming() { return true; }
 void bridge_get_status(BridgeStatus &st) { st = br; }
+uint16_t bridge_keyboard_backlight_timeout_s() { return 90; }
 void ota_get_status(OtaStatus &st) { st = ota; }
 // 48 213 keys, 6 702 clicks, 1.20 km of mouse
 void stats_get(StatsSnapshot &st) { st = {48213, 6702, 1200.0 / 0.0254 * MOUSE_CPI}; }

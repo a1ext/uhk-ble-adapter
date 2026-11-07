@@ -225,9 +225,20 @@ static void updateScreenPower()
         ui_close_menu();
     }
     const AnimSettings &as = anim_settings();
+    // The keyboard wakes the screen: typing brings the standby screen up on a dark
+    // screen and holds it; kbdIdleS after the last key it goes dark again, like the
+    // keyboard's own backlight. A standby screen the keyboard never touched keeps
+    // the plain off-after rule.
+    static bool standbyByKbd = false;
+    uint32_t lastKey = bridge_last_input_ms();
+    // idle 0 = the keyboard's own backlight timeout (60 s while it is not known, or "never")
+    uint32_t idleS = as.kbdIdleS ? as.kbdIdleS : bridge_keyboard_backlight_timeout_s() ? bridge_keyboard_backlight_timeout_s() : 60;
+    bool kbdActive = as.kbdWake && lastKey && millis() - lastKey < idleS * 1000UL;
     if (anim_playing() || ui_dashboard_shown()) {
+        standbyByKbd |= kbdActive;
         // Burn-in protection still applies to a standby screen left running
-        if (!animByCommand && as.offAfterS && millis() - standbySinceMs > as.offAfterS * 1000UL) {
+        bool expired = as.offAfterS && millis() - standbySinceMs > as.offAfterS * 1000UL;
+        if (!animByCommand && !kbdActive && (expired || standbyByKbd)) {
             anim_stop();
             ui_show_dashboard(false);
             standbyDone = true;
@@ -252,8 +263,11 @@ static void updateScreenPower()
     }
     bool wantDash = as.mode == ANIM_MODE_DASHBOARD || as.mode == ANIM_MODE_BOTH;
     bool wantAnim = as.mode == ANIM_MODE_STANDBY && anim_available();
-    if ((wantDash || wantAnim) && !standbyDone && screenLevel > 0 && idle > as.delayS * 1000UL) {
+    bool dark = screenLevel == 0 || standbyDone;
+    if ((wantDash || wantAnim) && idle > as.delayS * 1000UL && (dark ? kbdActive : !standbyDone)) {
         animByCommand = false;
+        standbyByKbd = kbdActive;
+        standbyDone = false;
         standbySinceMs = standbyPhaseMs = millis();
         if (wantDash)
             ui_show_dashboard(true);

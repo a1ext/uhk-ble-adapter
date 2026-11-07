@@ -512,6 +512,7 @@ static const uint8_t BRIGHT_MIN = 5;
 
 static lv_obj_t *menuShade, *menuTitle, *hostNameLabel, *hostAddrLabel, *renameBtn;
 static lv_obj_t *standbyMatrix, *animHint, *daySlider, *nightSlider, *dayValue, *nightValue;
+static lv_obj_t *kbdSwitch, *kbdSlider, *kbdValue, *kbdHint;
 static lv_obj_t *renamePanel, *renameTitle, *renameText, *renameKbd;
 static uint8_t menuSlot;
 
@@ -522,15 +523,30 @@ static void setPercent(lv_obj_t *label, int32_t v)
     setText(label, buf);
 }
 
+static void setSeconds(lv_obj_t *label, int32_t v) // 0 = the keyboard's own timeout
+{
+    char buf[8];
+    if (v)
+        snprintf(buf, sizeof(buf), "%d s", (int)v);
+    else
+        snprintf(buf, sizeof(buf), "auto");
+    setText(label, buf);
+}
+
 // The switch saves at once, a slider when it is let go
 static void animSettingEvent(lv_event_t *e)
 {
     lv_obj_t *o = lv_event_get_target(e);
-    if (lv_event_get_code(e) == LV_EVENT_VALUE_CHANGED && o != standbyMatrix) {
-        setPercent(o == daySlider ? dayValue : nightValue, lv_slider_get_value(o));
+    if (lv_event_get_code(e) == LV_EVENT_VALUE_CHANGED && o != standbyMatrix && o != kbdSwitch) {
+        if (o == kbdSlider)
+            setSeconds(kbdValue, lv_slider_get_value(o));
+        else
+            setPercent(o == daySlider ? dayValue : nightValue, lv_slider_get_value(o));
         return;
     }
     AnimSettings s = anim_settings();
+    s.kbdWake = lv_obj_has_state(kbdSwitch, LV_STATE_CHECKED);
+    s.kbdIdleS = lv_slider_get_value(kbdSlider);
     uint16_t pick = lv_btnmatrix_get_selected_btn(standbyMatrix);
     if (pick <= ANIM_MODE_BOTH) {
         s.mode = pick;
@@ -631,7 +647,8 @@ static void styleKnob(lv_obj_t *o, lv_style_selector_t glow)
     lv_obj_set_style_shadow_opa(o, LV_OPA_60, glow);
 }
 
-static lv_obj_t *makeSlider(lv_obj_t *row, const char *caption, lv_obj_t **value)
+static lv_obj_t *makeSlider(lv_obj_t *row, const char *caption, lv_obj_t **value, int32_t min = BRIGHT_MIN,
+                            int32_t max = 255)
 {
     lv_obj_t *l = makeLabel(row, &lv_font_montserrat_16, COLOR_DIM);
     lv_label_set_text(l, caption);
@@ -639,7 +656,7 @@ static lv_obj_t *makeSlider(lv_obj_t *row, const char *caption, lv_obj_t **value
     lv_obj_t *s = lv_slider_create(row);
     lv_obj_set_height(s, 10);
     lv_obj_set_flex_grow(s, 1);
-    lv_slider_set_range(s, BRIGHT_MIN, 255);
+    lv_slider_set_range(s, min, max);
     lv_obj_set_ext_click_area(s, 24);
     lv_obj_set_style_bg_color(s, lv_color_hex(0x2C2C30), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s, LV_OPA_COVER, LV_PART_MAIN);
@@ -744,6 +761,23 @@ static void makeMenu()
     r = makeMenuRow(c);
     lv_obj_set_style_pad_column(r, 16, 0);
     nightSlider = makeSlider(r, "Night", &nightValue);
+
+    // The keyboard wakes the screen (anim.h kbdWake / kbdIdleS)
+    r = makeMenuRow(c);
+    lv_obj_t *kbdName;
+    makeMenuText(r, &kbdName, &kbdHint);
+    lv_label_set_text(kbdName, "Keyboard wakes the screen");
+    lv_label_set_text(kbdHint, "typing shows the standby screen, idle turns it off");
+    kbdSwitch = lv_switch_create(r);
+    lv_obj_set_size(kbdSwitch, 64, 34);
+    lv_obj_set_style_bg_color(kbdSwitch, lv_color_hex(0x2C2C30), LV_PART_MAIN);
+    styleNeon(kbdSwitch, LV_PART_INDICATOR | LV_STATE_CHECKED);
+    styleKnob(kbdSwitch, LV_PART_KNOB | LV_STATE_CHECKED);
+    lv_obj_set_ext_click_area(kbdSwitch, 14);
+    lv_obj_add_event_cb(kbdSwitch, animSettingEvent, LV_EVENT_VALUE_CHANGED, nullptr);
+    r = makeMenuRow(c);
+    lv_obj_set_style_pad_column(r, 16, 0);
+    kbdSlider = makeSlider(r, "Idle", &kbdValue, 0, 600); // 0 = the keyboard's own backlight timeout
 }
 
 // Full screen: the name above the keyboard (OK saves, the close key cancels)
@@ -831,6 +865,13 @@ static void updateMenu(const BleHidStatus &ble)
     if (!used)
         showRename(false); // the host went away meanwhile
     uint8_t mode = anim_settings().mode;
+    char kbd[64];
+    uint16_t fromKbd = bridge_keyboard_backlight_timeout_s();
+    if (fromKbd)
+        snprintf(kbd, sizeof(kbd), "typing shows the standby screen; backlight fades after %u s", fromKbd);
+    else
+        snprintf(kbd, sizeof(kbd), "typing shows the standby screen; auto = 60 s (timeout not read)");
+    setText(kbdHint, kbd);
     setText(animHint, mode == ANIM_MODE_OFF         ? "dims, then switches off"
                       : mode == ANIM_MODE_DASHBOARD ? "clock, meetings, PC load"
                       : !anim_available()           ? "no animation uploaded yet"
@@ -849,6 +890,12 @@ void ui_open_menu()
     lv_slider_set_value(nightSlider, s.nightBrightness, LV_ANIM_OFF);
     setPercent(dayValue, lv_slider_get_value(daySlider));
     setPercent(nightValue, lv_slider_get_value(nightSlider));
+    if (s.kbdWake)
+        lv_obj_add_state(kbdSwitch, LV_STATE_CHECKED);
+    else
+        lv_obj_clear_state(kbdSwitch, LV_STATE_CHECKED);
+    lv_slider_set_value(kbdSlider, s.kbdIdleS, LV_ANIM_OFF);
+    setSeconds(kbdValue, lv_slider_get_value(kbdSlider));
     updateMenu(ble);
     showRename(false);
     setVisible(menuShade, true);

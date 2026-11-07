@@ -193,8 +193,20 @@ pin (USB port or charger).
   mode, delay, brightness, off-after; default standby after 60 s idle, brightness 80, screen
   off after 30 min of animation; mode 0 off / 1 animation / 2 dashboard / 3 both in turns,
   3 min dashboard then 2 min animation, `main.cpp` standby logic). Touch stops it (the
-  touch is swallowed); keyboard typing
-  does not count as activity. PC side: `tools/ble_anim.py` (make / preview / upload / play /
+  touch is swallowed); keyboard typing never brings the main screen back. "Keyboard
+  wakes the screen" (`kbdWake`, `kbdIdleS`; NVS "kbd" / "kbdidle"; 0x12 / 0x13 carry them
+  after the night brightness; `bridge_last_input_ms()` = last key / click / motion): keys
+  on a dark screen start the standby screen and hold it, `kbdIdleS` after the last key it
+  goes dark (`standbyByKbd` in main.cpp; a standby screen the keyboard never touched keeps
+  the off-after rule). `kbdIdleS` 0 = "auto": the keyboard's own backlight timeout, which
+  bridge.cpp reads from the keyboard 1.5 s after it comes up (`probe*`: Agent ReadConfig
+  0x04 of buffer 2 = validated user config, two 63-byte chunks, replies taken off the Agent
+  input stream and not forwarded; `parseBacklightTimeout()` mirrors the UHK firmware's
+  parse_config.c header: version u16×3, length u32, device name (compact length), double-tap
+  timeout, then `keyBacklightFadeOutTimeout` for data model ≥ 8 — ledsFadeTimeout for 6–7;
+  value in seconds, 0 / unreadable → 60 s). Not sent while a host Agent command went out in
+  the last 2 s. Exposed as `bridge_keyboard_backlight_timeout_s()`, the info reply (0x13)
+  carries it, the menu hint shows it. PC side: `tools/ble_anim.py` (make / preview / upload / play /
   stop / info / set; input = `demo:<name>` from `tools/anim_demos.py`, GIF / WebP / PNG
   folder, or .uanm), encoder `tools/uanm.py`, shared WinRT link `tools/ble_link.py`
   (also used by ble_ota.py).

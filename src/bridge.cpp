@@ -1,4 +1,6 @@
 #include "bridge.h"
+
+static volatile uint32_t lastInputMs = 0; // last key / click / motion (USB task), 0 = none yet
 #include <Arduino.h>
 #include <Preferences.h>
 #include <freertos/semphr.h>
@@ -412,6 +414,133 @@ static void sendReleaseAll()
             qPush(id, zero, bleRefs[id].in->bytes());
 }
 
+// ---------------- The keyboard's backlight timeout ----------------
+// Asked of the keyboard itself over the Agent channel, 1.5 s after it came up:
+// ReadConfig (0x04) of the validated user config (buffer 2), two 63-byte reads of
+// its head, parsed like the UHK firmware's parse_config.c: keyBacklightFadeOutTimeout
+// (seconds) with data model >= 8, ledsFadeTimeout with 6..7. The replies are the
+// next Agent input reports and are not forwarded to the host. The screen can then
+// go dark together with the backlight (anim.h kbdIdleS 0 = this value).
+static const uint8_t  PROBE_CHUNK = 62;                    // the 63-byte report less its status byte
+static const uint32_t PROBE_DELAY_MS = 1500, PROBE_REPLY_MS = 1000, PROBE_QUIET_MS = 2000;
+static uint8_t  probeStep = 0;                             // 0 idle, 1 / 2 chunk n requested, 3 done, 4 given up
+static uint32_t probeDueMs = 0, probeSentMs = 0, agentCmdMs = 0;
+static uint8_t  probeBuf[2 * PROBE_CHUNK];
+static uint16_t kbdBacklightS = 0;                         // 0 = unknown
+static char     probeWhy[40];                              // why it failed, for the log
+
+static bool parseBacklightTimeout(const uint8_t *b, size_t n, uint16_t &timeoutS)
+{
+    size_t p = 0;
+    auto u8 = [&](uint8_t &v) { if (p + 1 > n) return false; v = b[p++]; return true; };
+    auto u16 = [&](uint16_t &v) { if (p + 2 > n) return false; v = b[p] | b[p + 1] << 8; p += 2; return true; };
+    auto skip = [&](size_t k) { if (p + k > n) return false; p += k; return true; };
+    uint16_t major, minor, patch, len;
+    uint8_t len8;
+    if (!u16(major) || !u16(minor) || !u16(patch) || major < 6 || major > 30)
+        return false;
+    if (!skip(4))                                          // userConfigLength (u32 since v6)
+        return false;
+    if (!u8(len8) || (len8 == 0xFF ? !u16(len) : (len = len8, false)) || len > 64 || !skip(len))
+        return false;                                      // device name
+    if (!skip(2))                                          // doubleTapSwitchLayerTimeout
+        return false;
+    if (major < 8)                                         // 3 brightness bytes, then ledsFadeTimeout
+        return skip(3) && u16(timeoutS);
+    // perKeyRgbPresent, backlightingMode, 8 key action colours (+ Device since v9)
+    if (!skip(1 + 1 + 8 * 3 + (major >= 9 ? 3 : 0)))
+        return false;
+    if (!skip(10))                                         // mouse kinetic properties
+        return false;
+    // v7: secondary role strategy (1 + 2 + 2 + 2 + 1 + 1 + 1), two axis skews (floats),
+    // diagonalSpeedCompensation, doubletapTimeout, keystrokeDelay
+    if (!skip(10 + 8 + 1 + 2 + 2))
+        return false;
+    // v8: 4 brightness bytes, display fade-outs (2 x u16), then keyBacklightFadeOutTimeout
+    return skip(4 + 2 + 2) && u16(timeoutS);
+}
+
+static void probeRequest(uint8_t chunk)                    // USB / loop task
+{
+    uint8_t req[PROBE_CHUNK] = {0x04 /* ReadConfig */, 2 /* validated user config */, PROBE_CHUNK,
+                                (uint8_t)(chunk * PROBE_CHUNK), 0};
+    probeStep = chunk + 1;
+    probeSentMs = millis();
+    usb_hid_host_set_report(mapToUsb[agentIface], HID_OUTPUT, 0, req, sizeof(req));
+}
+
+// An Agent input report while a chunk is awaited: true = it was the reply (consumed)
+static bool probeTakeReply(const uint8_t *data, uint16_t len)
+{
+    if (probeStep != 1 && probeStep != 2)
+        return false;
+    uint8_t chunk = probeStep - 1;
+    if (len < 1 + PROBE_CHUNK || data[0] != 0) {           // UsbStatusCode_Success
+        snprintf(probeWhy, sizeof(probeWhy), "status %u, %u bytes", data[0], len);
+        probeStep = 4;
+        return true;
+    }
+    memcpy(probeBuf + chunk * PROBE_CHUNK, data + 1, PROBE_CHUNK);
+    if (chunk == 0) {
+        probeRequest(1);
+        return true;
+    }
+    uint16_t t;
+    if (parseBacklightTimeout(probeBuf, sizeof(probeBuf), t) && t <= 3600) {
+        kbdBacklightS = t;
+        probeStep = 3;
+    } else {
+        snprintf(probeWhy, sizeof(probeWhy), "config v%u.%u not parsed", probeBuf[0] | probeBuf[1] << 8,
+                 probeBuf[2] | probeBuf[3] << 8);
+        probeStep = 4;
+    }
+    return true;
+}
+
+static void probeSchedule()
+{
+    probeStep = 0;
+    kbdBacklightS = 0;
+    probeDueMs = millis() + PROBE_DELAY_MS;
+}
+
+static void probeLoop()                                    // Arduino loop
+{
+    static uint8_t logged = 0;
+    if (probeStep == 0 && probeDueMs && usbReady && agentIface >= 0 && mapToUsb[agentIface] >= 0
+        && (int32_t)(millis() - probeDueMs) >= 0 && millis() - agentCmdMs > PROBE_QUIET_MS) {
+        probeDueMs = 0;
+        logged = 0;
+        probeRequest(0);
+    } else if ((probeStep == 1 || probeStep == 2) && millis() - probeSentMs > PROBE_REPLY_MS) {
+        snprintf(probeWhy, sizeof(probeWhy), "no reply to chunk %u", probeStep - 1);
+        probeStep = 4;
+    }
+    if (probeStep >= 3 && logged != probeStep) {
+        logged = probeStep;
+        if (probeStep == 3)
+            logf("Keyboard: backlight fades after %u s", kbdBacklightS);
+        else
+            logf("Keyboard: backlight timeout not read (%s)", probeWhy);
+    }
+}
+
+uint16_t bridge_keyboard_backlight_timeout_s()
+{
+    return kbdBacklightS;
+}
+
+// Diagnostics for `ble_anim.py info`: the probe's state and the head of the config
+const char *bridge_keyboard_probe_note()
+{
+    static char note[128];
+    int n = snprintf(note, sizeof(note), "%s: ",
+                     probeStep == 3 ? "read" : probeStep == 4 ? probeWhy : probeStep ? "pending" : "not started");
+    for (int i = 0; i < 40 && n < (int)sizeof(note) - 3; i++)
+        n += snprintf(note + n, sizeof(note) - n, "%02x", probeBuf[i]);
+    return note;
+}
+
 // ---------------- Host -> keyboard (output / feature reports) ----------------
 static void forwardHostReport(const HostReport &h)
 {
@@ -448,6 +577,7 @@ static void onAgentCommand(HidReportType type, uint8_t id, const uint8_t *data, 
     }
     HostReport h{type, id, (uint8_t)min<uint16_t>(len, MAX_REPORT), {}};
     memcpy(h.data, data, h.len);
+    agentCmdMs = millis(); // the backlight probe keeps out of the host's way
     if (usbReady)
         forwardHostReport(h);
 }
@@ -546,6 +676,7 @@ static uint32_t onDeviceReady(const UsbHidDevice &dev)
         }
     }
     usbReady = true;
+    probeSchedule(); // ask the keyboard for its backlight timeout in a moment
 
     xSemaphoreTake(hostLock, portMAX_DELAY);
     std::vector<HostReport> pending = hostReports;
@@ -592,8 +723,10 @@ static void countReport(BleRef &ref, const uint8_t *data, uint16_t len)
             if (f.xyMask & (1 << k) && f.bitOffset + (k + 1) * f.bitSize <= bits)
                 xy[axes++] = fieldValue(now, f.bitOffset + k * f.bitSize, f);
     memcpy(ref.prev.data(), now, ref.prev.size());
-    if (keys || clicks || xy[0] || xy[1])
+    if (keys || clicks || xy[0] || xy[1]) {
         stats_add(keys, clicks, sqrtf((float)xy[0] * xy[0] + (float)xy[1] * xy[1]));
+        lastInputMs = millis() | 1; // never 0 once something came
+    }
 }
 
 static void onInputReport(uint8_t ifaceIdx, const uint8_t *data, uint16_t len)
@@ -603,6 +736,8 @@ static void onInputReport(uint8_t ifaceIdx, const uint8_t *data, uint16_t len)
     const IfaceMap &m = ifmaps[usbToMap[ifaceIdx]];
     if (!m.forward)
         return;
+    if (usbToMap[ifaceIdx] == agentIface && probeTakeReply(data, len))
+        return; // our own ReadConfig reply, not the host's
     uint8_t id;
     if (m.info.usesIds) {
         if (!len)
@@ -698,6 +833,7 @@ void bridge_loop()
         startBle();
     }
     ble_hid_poll();
+    probeLoop();
 
     static uint32_t loggedFw = 0, loggedLocked = 0;
     if (agentFwRefused != loggedFw) {
@@ -732,6 +868,11 @@ void bridge_agent_allow(bool allow)
     agentUnlockUntilMs = millis() + AGENT_UNLOCK_MS;
     agentUnlocked = allow;
     logf("Agent: config access %s", allow ? "allowed - retry in UHK Agent" : "locked");
+}
+
+uint32_t bridge_last_input_ms()
+{
+    return lastInputMs;
 }
 
 void bridge_get_status(BridgeStatus &st)

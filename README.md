@@ -78,14 +78,22 @@ bottom of the case):
 | Settings menu | **Rename** | On-screen keyboard for the host's name: OK saves, the keyboard key cancels |
 | Settings menu | **Off / Anim / Dash / Both** | What the screen shows after 60 s without a touch |
 | Settings menu | **Day / Night** sliders | Brightness of the standby screen and the spectrum |
+| Settings menu | **Keyboard wakes the screen** + **Idle** | Typing brings the standby screen up on a dark screen and keeps it; it goes dark *Idle* seconds after the last key. *auto* = the keyboard's own backlight timeout, which the adapter reads from the keyboard's configuration |
 | Settings menu | **✕** or **BOOT** | Closes it (it also closes by itself after 60 s); the menu scrolls down |
 | Reminder card | Tap **✕** | Dismisses that meeting for today - over the animation, the spectrum and the dashboard too |
 | Dark screen, dashboard, animation, spectrum | Any other touch, or **BOOT** | Back to the main screen; nothing underneath is tapped (the spectrum returns after 30 s) |
 
-Typing on the keyboard is not a touch: it neither wakes the screen nor ends
-the standby screen. The screen dims after a minute without a touch and goes
-dark after three when no standby screen is chosen; a standby screen goes dark
-after 30 minutes.
+Typing on the keyboard is not a touch: it never brings the main screen back
+and never ends a standby screen. With **Keyboard wakes the screen** on (the
+default) it does the opposite: keys on a dark screen start the standby screen
+(animation, dashboard, or both in turns, as chosen), keys keep it up, and
+*Idle* seconds after the last key it goes dark again. With *Idle* on *auto*
+(the default) that is the keyboard's own backlight timeout: the adapter reads
+it from the keyboard's configuration when the keyboard comes up, so the two
+fade together (60 s while it cannot be read). The screen dims
+after a minute without a touch and goes dark after three when no standby
+screen is chosen; a standby screen the keyboard did not touch goes dark after
+30 minutes.
 
 ## Screen animations
 

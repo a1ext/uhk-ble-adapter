@@ -51,6 +51,14 @@ struct AnimSettings {
     uint8_t  brightness;  // while it plays
     uint16_t offAfterS;   // screen off after this much standby animation, 0 = never
     uint8_t  nightBrightness;
+    // The screen follows the keyboard: typing on a dark screen brings the standby
+    // screen up, it stays while keys come, and goes dark kbdIdleS after the last
+    // key. kbdIdleS 0 = the keyboard's own backlight timeout, read from its config
+    // (bridge_keyboard_backlight_timeout_s(); 60 s while unknown). Commands 12 / 13
+    // carry both after the night brightness: <kbd wake u8> <kbd idle s u16>; the
+    // info reply adds <keyboard's timeout u16> (0 = unknown)
+    bool     kbdWake;
+    uint16_t kbdIdleS;
 };
 
 void anim_begin();                          // loads the stored animation and the settings

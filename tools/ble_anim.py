@@ -22,7 +22,8 @@ import numpy as np  # noqa: E402
 import uanm  # noqa: E402
 from PIL import Image, ImageSequence  # noqa: E402
 
-MODES = {"off": 0, "standby": 1}
+MODES = {"off": 0, "standby": 1, "dashboard": 2, "both": 3}   # anim.h
+MODE_NAMES = ["off", "animation", "dashboard", "dashboard + animation"]
 
 
 def load_frames(src: str, scale: int, fps, max_frames: int):
@@ -87,17 +88,25 @@ async def link(args):
 
 
 async def query(lk):
-    """-> (frames, w, h, scale, ms, mode, delay, bright, off, night, clock or None)"""
+    """-> dict: frames, w, h, scale, ms, mode, delay, bright, off, night, clock (or None),
+    kbd_wake, kbd_idle"""
     await lk.command(bytes([0x13]))
     while True:
         v = await lk.event(5)
         if v[:1] == b"\x10" and len(v) >= 17:
-            _, _, frames, w, h, scale, ms, mode, delay, bright, off = struct.unpack("<BBHHHBHBHBH", v[:17])
-            night, clock = bright, None              # firmware before the day / night brightness
-            if len(v) >= 21:
+            frames, w, h, scale, ms, mode, delay, bright, off = struct.unpack("<HHHBHBHBH", v[2:17])
+            r = dict(frames=frames, w=w, h=h, scale=scale, ms=ms, mode=mode, delay=delay, bright=bright,
+                     off=off, night=bright, clock=None, kbd_wake=True, kbd_idle=60)
+            if len(v) >= 21:                          # day / night brightness, the clock
                 night, valid, hh, mm = v[17:21]
-                clock = f"{hh:02d}:{mm:02d}" if valid else None
-            return frames, w, h, scale, ms, mode, delay, bright, off, night, clock
+                r.update(night=night, clock=f"{hh:02d}:{mm:02d}" if valid else None)
+            if len(v) >= 24:                          # the keyboard wakes the screen
+                r.update(kbd_wake=bool(v[21]), kbd_idle=v[22] | v[23] << 8)
+            if len(v) >= 26:                          # the keyboard's own backlight timeout
+                r.update(kbd_timeout=v[24] | v[25] << 8)
+            if len(v) >= 27:                          # how reading it went (diagnostics)
+                r.update(note=v[27:27 + v[26]].decode("ascii", "replace"))
+            return r
 
 
 async def cmd_upload(args):
@@ -116,28 +125,37 @@ async def cmd_simple(args):
 
 async def cmd_info(args):
     lk = await link(args)
-    frames, w, h, scale, ms, mode, delay, bright, off, night, clock = await query(lk)
-    if frames:
-        print(f"animation: {frames} frames {w}x{h} x{scale}, {ms} ms/frame ({frames * ms / 1000:.1f} s loop)")
+    q = await query(lk)
+    if q["frames"]:
+        print(f"animation: {q['frames']} frames {q['w']}x{q['h']} x{q['scale']}, {q['ms']} ms/frame "
+              f"({q['frames'] * q['ms'] / 1000:.1f} s loop)")
     else:
         print("animation: none stored")
-    print(f"standby: {'animation' if mode else 'off'} after {delay} s idle, "
-          f"screen off after {off} s of animation" + (" (never)" if not off else ""))
-    print(f"brightness: day {bright}, night {night} (animation and live spectrum); "
-          f"adapter clock {clock or 'not set'}")
+    print(f"standby: {MODE_NAMES[q['mode']]} after {q['delay']} s idle, "
+          f"screen off after {q['off']} s of standby" + (" (never)" if not q['off'] else ""))
+    print(f"brightness: day {q['bright']}, night {q['night']} (standby screen and live spectrum); "
+          f"adapter clock {q['clock'] or 'not set'}")
+    kb = q.get("kbd_timeout", 0)
+    idle = f"{q['kbd_idle']} s" if q["kbd_idle"] else f"auto ({kb} s, the keyboard's backlight timeout)" if kb \
+        else "auto (60 s: the keyboard's timeout not read)"
+    print(f"keyboard: {'wakes the screen' if q['kbd_wake'] else 'ignored'}, off {idle} after the last key")
+    if q.get("note"):
+        print(f"keyboard config probe: {q['note']}")
 
 
 async def cmd_set(args):
     lk = await link(args)
-    _, _, _, _, _, mode, delay, bright, off, night, _ = await query(lk)
-    mode = MODES[args.mode] if args.mode else mode
-    delay = args.delay if args.delay is not None else delay
-    bright = args.brightness if args.brightness is not None else bright
-    night = args.night if args.night is not None else night
-    off = args.off_after if args.off_after is not None else off
-    await lk.command(struct.pack("<BBHBHB", 0x12, mode, delay, bright, off, night))
-    print(f"standby: {'animation' if mode else 'off'} after {delay} s, brightness day {bright} / "
-          f"night {night}, off after {off} s")
+    q = await query(lk)
+    mode = MODES[args.mode] if args.mode else q["mode"]
+    delay = args.delay if args.delay is not None else q["delay"]
+    bright = args.brightness if args.brightness is not None else q["bright"]
+    night = args.night if args.night is not None else q["night"]
+    off = args.off_after if args.off_after is not None else q["off"]
+    kbd_wake = {"on": True, "off": False}[args.kbd_wake] if args.kbd_wake else q["kbd_wake"]
+    kbd_idle = args.kbd_idle if args.kbd_idle is not None else q["kbd_idle"]
+    await lk.command(struct.pack("<BBHBHBBH", 0x12, mode, delay, bright, off, night, kbd_wake, kbd_idle))
+    print(f"standby: {MODE_NAMES[mode]} after {delay} s, brightness day {bright} / night {night}, "
+          f"off after {off} s; keyboard {'wakes the screen' if kbd_wake else 'ignored'}, idle {kbd_idle} s")
 
 
 def own_console():
@@ -181,7 +199,11 @@ def main(argv=None):
     p.add_argument("--delay", type=int, help="idle seconds before the animation (min 5)")
     p.add_argument("--brightness", type=int, help="1-255 by day (9:00-18:00) while it plays")
     p.add_argument("--night", type=int, help="1-255 at night (22:00-6:00); ramps in between")
-    p.add_argument("--off-after", type=int, help="screen off after this many seconds of animation, 0 = never")
+    p.add_argument("--off-after", type=int, help="screen off after this many seconds of standby, 0 = never")
+    p.add_argument("--kbd-wake", choices=("on", "off"),
+                   help="typing brings the standby screen up on a dark screen and holds it")
+    p.add_argument("--kbd-idle", type=int, help="seconds without a key before it goes dark, 5-600; "
+                                               "0 = the keyboard's own backlight timeout (read from it)")
     if not argv:
         ap.print_help()
         print("\nTo upload an animation, drop a GIF / WebP file or a folder of PNGs on this program,"

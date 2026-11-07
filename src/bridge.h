@@ -33,3 +33,10 @@ void bridge_start();                // starts the USB host and (with a known map
 void bridge_loop();                 // Arduino loop: deferred BLE start, restarts
 void bridge_agent_allow(bool allow); // screen: allow / lock Agent config access
 void bridge_get_status(BridgeStatus &st);
+// millis() of the keyboard's last key / click / pointer motion, 0 = none yet: the
+// adapter sees the keyboard wake up (its backlight) as reports start coming
+uint32_t bridge_last_input_ms();
+// The keyboard's own backlight fade-out timeout in seconds, read from its user
+// config over the Agent channel after it came up; 0 = not known (yet)
+uint16_t bridge_keyboard_backlight_timeout_s();
+const char *bridge_keyboard_probe_note(); // how that read went + the config's first bytes (diagnostics)

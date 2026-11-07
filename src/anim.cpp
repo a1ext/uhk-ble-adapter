@@ -4,6 +4,7 @@
 #include <esp_partition.h>
 #include <math.h>
 #include <lvgl.h>
+#include "bridge.h"
 #include "display.h"
 #include "log.h"
 #include "ota.h"
@@ -42,7 +43,7 @@ static bool     playing;
 static uint16_t current;
 static uint32_t nextFrameMs, startedMs;
 
-static AnimSettings settings = {ANIM_MODE_STANDBY, 60, 180, 30 * 60, 30};
+static AnimSettings settings = {ANIM_MODE_STANDBY, 60, 180, 30 * 60, 30, true, 0}; // idle 0 = the keyboard's
 
 // Local time of day from the RTC, read once and then counted with millis()
 static bool     clockValid;
@@ -274,28 +275,45 @@ static void saveSettings()
     nvs.putUChar("bright", settings.brightness);
     nvs.putUShort("off", settings.offAfterS);
     nvs.putUChar("night", settings.nightBrightness);
+    nvs.putBool("kbd", settings.kbdWake);
+    nvs.putUShort("kbdidle", settings.kbdIdleS);
     nvs.end();
 }
 
 static void logSettings()
 {
     static const char *const modes[] = {"off", "animation", "dashboard", "dashboard + animation"};
-    logf("Anim: standby %s after %u s, brightness %u / night %u, off after %u s",
+    char idle[24];
+    if (settings.kbdIdleS)
+        snprintf(idle, sizeof(idle), "idle %u s", settings.kbdIdleS);
+    else
+        snprintf(idle, sizeof(idle), "idle = the keyboard's");
+    logf("Anim: standby %s after %u s, brightness %u / night %u, off after %u s, keyboard %s (%s)",
          modes[min<uint8_t>(settings.mode, ANIM_MODE_BOTH)], settings.delayS, settings.brightness,
-         settings.nightBrightness, settings.offAfterS);
+         settings.nightBrightness, settings.offAfterS, settings.kbdWake ? "wakes it" : "ignored", idle);
 }
 
 static void sendInfo()
 {
     uint16_t frames = loaded ? hdr.frames : 0;
     uint32_t sod = secondsOfDay();
-    uint8_t v[21] = {0x10, 1, (uint8_t)frames, (uint8_t)(frames >> 8), (uint8_t)hdr.width,
+    uint16_t kbdTimeout = bridge_keyboard_backlight_timeout_s();
+    uint8_t v[26] = {0x10, 1, (uint8_t)frames, (uint8_t)(frames >> 8), (uint8_t)hdr.width,
                      (uint8_t)(hdr.width >> 8), (uint8_t)hdr.height, (uint8_t)(hdr.height >> 8), hdr.scale,
                      (uint8_t)hdr.frameMs, (uint8_t)(hdr.frameMs >> 8), settings.mode,
                      (uint8_t)settings.delayS, (uint8_t)(settings.delayS >> 8), settings.brightness,
                      (uint8_t)settings.offAfterS, (uint8_t)(settings.offAfterS >> 8), settings.nightBrightness,
-                     clockValid, (uint8_t)(sod / 3600), (uint8_t)(sod / 60 % 60)};
-    ota_notify(v, sizeof(v));
+                     clockValid, (uint8_t)(sod / 3600), (uint8_t)(sod / 60 % 60),
+                     settings.kbdWake, (uint8_t)settings.kbdIdleS, (uint8_t)(settings.kbdIdleS >> 8),
+                     (uint8_t)kbdTimeout, (uint8_t)(kbdTimeout >> 8)};
+    // + <len u8> <text>: how the backlight probe went (diagnostics)
+    uint8_t out[sizeof(v) + 1 + 128];
+    memcpy(out, v, sizeof(v));
+    const char *note = bridge_keyboard_probe_note();
+    size_t nl = min<size_t>(strlen(note), 128);
+    out[sizeof(v)] = nl;
+    memcpy(out + sizeof(v) + 1, note, nl);
+    ota_notify(out, sizeof(v) + 1 + nl);
 }
 
 void anim_command(const uint8_t *cmd, size_t n)
@@ -324,6 +342,12 @@ static AnimEvent handle(const Cmd &c)
             settings.offAfterS = c.data[5] | c.data[6] << 8;
             if (c.len >= 8)
                 settings.nightBrightness = max<uint8_t>(1, c.data[7]);
+            if (c.len >= 11) {
+                settings.kbdWake = c.data[8] != 0;
+                settings.kbdIdleS = c.data[9] | c.data[10] << 8; // 0 = the keyboard's own timeout
+                if (settings.kbdIdleS && settings.kbdIdleS < 5)
+                    settings.kbdIdleS = 5;
+            }
             saveSettings();
             logSettings();
         }
@@ -423,6 +447,8 @@ void anim_begin()
     settings.brightness = nvs.getUChar("bright", settings.brightness);
     settings.offAfterS = nvs.getUShort("off", settings.offAfterS);
     settings.nightBrightness = nvs.getUChar("night", settings.nightBrightness);
+    settings.kbdWake = nvs.getBool("kbd", settings.kbdWake);
+    settings.kbdIdleS = nvs.getUShort("kbdidle", settings.kbdIdleS);
     nvs.end();
     readClock();
     logf(clockValid ? "Clock: %02lu:%02lu (RTC)" : "Clock: not set - the computer sets it",
@@ -448,10 +474,13 @@ const AnimSettings &anim_settings()
 void anim_set_settings(const AnimSettings &s)
 {
     if (s.mode == settings.mode && s.delayS == settings.delayS && s.brightness == settings.brightness
-        && s.offAfterS == settings.offAfterS && s.nightBrightness == settings.nightBrightness)
+        && s.offAfterS == settings.offAfterS && s.nightBrightness == settings.nightBrightness
+        && s.kbdWake == settings.kbdWake && s.kbdIdleS == settings.kbdIdleS)
         return;
     settings = s;
     settings.delayS = max<uint16_t>(5, settings.delayS);
+    if (settings.kbdIdleS && settings.kbdIdleS < 5)
+        settings.kbdIdleS = 5;
     settings.brightness = max<uint8_t>(1, settings.brightness);
     settings.nightBrightness = max<uint8_t>(1, settings.nightBrightness);
     saveSettings();
