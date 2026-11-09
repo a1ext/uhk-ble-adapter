@@ -53,7 +53,7 @@ class Rolling:
 class Analyzer:
     """Windowed rfft -> log-spaced bands -> levels 0..255."""
 
-    def __init__(self, samplerate, nfft, bands, fmin, fmax, floor, ceil, tilt, gate, agc):
+    def __init__(self, samplerate, nfft, bands, fmin, fmax, floor, ceil, tilt, gate, agc, fps=60.0):
         edges = np.geomspace(fmin, min(fmax, samplerate / 2 * 0.99), bands + 1)
         freqs = np.fft.rfftfreq(nfft, 1.0 / samplerate)
         self.groups = []
@@ -68,18 +68,19 @@ class Analyzer:
         self.tilt_db = tilt * np.log2(centers / centers[0])  # music falls ~3 dB/octave
         self.floor, self.ceil, self.span = floor, ceil, max(ceil - floor, 1.0)
         self.gate, self.agc, self.agc_state = gate, agc, ceil
+        self.fps = max(fps, 1.0)
 
     def levels(self, mono) -> bytes:
         mag = np.abs(np.fft.rfft(mono * self.window))
         raw = 20 * np.log10(np.array([mag[g].max() for g in self.groups]) + 1e-12) - self.ref_db
         gain = 0.0
         if self.agc:
-            # slow tracker on the loudest (tilted) band: ~30 dB/s up, ~3 dB/s down at 60 fps
+            # slow tracker on the loudest (tilted) band: ~30 dB/s up, ~3 dB/s down
             loud = float((raw + self.tilt_db).max())
             if self.agc_state <= self.floor + 0.01 and loud > self.floor:
                 self.agc_state = loud                   # first sound after silence: snap
             else:
-                rate = 0.5 if loud > self.agc_state else 0.055
+                rate = (0.5 if loud > self.agc_state else 0.055) * (60.0 / self.fps)
                 self.agc_state += float(np.clip(loud - self.agc_state, -rate, rate))
             self.agc_state = max(self.agc_state, self.floor)
             gain = float(np.clip(self.ceil - AGC_HEADROOM - self.agc_state, -20.0, 30.0))
@@ -108,11 +109,15 @@ class Latest:
 
 
 def capture(args, out: Latest, stop: threading.Event):
+    if sys.platform == "darwin" and not args.device:
+        import macos_audio
+        macos_audio.capture_macos(args, out, stop, Analyzer, Rolling, config_path().parent)
+        return
     import soundcard as sc
     spk = sc.get_speaker(args.device) if args.device else sc.default_speaker()
     hop = int(round(args.samplerate / args.fps))
     an = Analyzer(args.samplerate, args.fft, args.bands, args.fmin, args.fmax,
-                  args.floor, args.ceil, args.tilt, args.gate, args.agc)
+                  args.floor, args.ceil, args.tilt, args.gate, args.agc, args.fps)
     roll = Rolling(args.fft)
     args.analyzer = an                  # the tray app toggles an.agc while it runs
     print(f"loopback: {spk.name} @ {args.samplerate} Hz | window {args.fft} "
@@ -172,13 +177,27 @@ async def audio_loop(args, lk, stop, on_state):
             sent, t0 = 0, time.time()
 
 
+async def keep_awake_loop(lk):
+    """macOS rejects min_int=6 (7.5 ms) from src/ble_hid.cpp and applies BLE HID
+    peripheral latency = 23 (24 * 15 ms = 360 ms radio sleep when no notifications
+    come from the keyboard). Prompting an info notification keeps the adapter's
+    radio awake on every 15 ms connection event while the spectrum streams."""
+    while True:
+        while not lk.events.empty():
+            lk.events.get_nowait()
+        if not await lk.write_ctrl(b"\x13"):
+            raise ConnectionError("the adapter stopped answering on control")
+
+
 async def stats_loop(args, lk):
     """The system load for the dashboard, twice a second (sysstats.py)."""
     import sysstats
-    sampler = sysstats.Sampler()
+    loop = asyncio.get_running_loop()
+    sampler = await loop.run_in_executor(None, sysstats.Sampler)
     fails = 0
     while True:
-        if await lk.send_live(sampler.sample()):
+        pkt = await loop.run_in_executor(None, sampler.sample)
+        if await lk.send_live(pkt):
             fails = 0
         else:
             fails += 1
@@ -233,6 +252,8 @@ async def run(args, on_state=None):
     tasks = []
     if args.audio:
         tasks.append(asyncio.create_task(audio_loop(args, lk, stop, on_state)))
+        if sys.platform == "darwin":
+            tasks.append(asyncio.create_task(keep_awake_loop(lk)))
     if args.stats:
         tasks.append(asyncio.create_task(stats_loop(args, lk)))
     if args.calendar and args.calendar_on:

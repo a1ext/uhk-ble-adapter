@@ -4,10 +4,9 @@ this backend off Windows.
 
 The adapter does not advertise while its host is connected, so a scan does not
 find it then. Linux: BlueZ knows the paired device, the link looks it up with
-`bluetoothctl devices Paired` and connects by address. macOS: bleak needs the
-peripheral's identifier from a scan - run a tool while the adapter is not
-connected (its slot waiting for the Mac), the first run prints the identifier
-to pass with --address from then on.
+`bluetoothctl devices Paired` and connects by address. macOS: CoreBluetooth
+retrieves the connected peripheral by its service (or by identifier when
+--address is passed) without scanning.
 """
 import asyncio
 import subprocess
@@ -15,7 +14,7 @@ import sys
 
 from bleak import BleakClient, BleakScanner
 
-from ble_link import CTRL, DATA, LinkBase
+from ble_link import CTRL, DATA, SERVICE, LinkBase
 
 SCAN_S = 8
 
@@ -24,18 +23,18 @@ class BleakLink(LinkBase):
     address = None     # the tools set it from --address
 
     async def connect(self, name_prefix="UHK60 BLE"):
-        address = self.address or await self._find(name_prefix)
-        if not address:
+        target = await self._find(name_prefix)
+        if not target:
             sys.exit(f"no paired device named '{name_prefix}*': pair the adapter first "
                      "(Linux: bluetoothctl), or pass its address with --address")
-        self.client = BleakClient(address, timeout=20)
+        self.client = BleakClient(target, timeout=20)
         try:
             await self.client.connect()
         except Exception as e:  # bleak raises its own and OS errors
-            sys.exit(f"cannot connect to {address}: {e}")
+            sys.exit(f"cannot connect to {target}: {e}")
         self.mtu = self.client.mtu_size
         if self.name == "?":
-            self.name = address
+            self.name = getattr(target, "name", None) or str(target)
         loop = asyncio.get_running_loop()
 
         def on_notify(_, data):
@@ -50,7 +49,39 @@ class BleakLink(LinkBase):
         await self.set_clock()
         return self
 
+    async def _find_macos(self, prefix):
+        from CoreBluetooth import CBUUID
+        from Foundation import NSArray, NSUUID
+        from bleak.backends.corebluetooth.CentralManagerDelegate import CentralManagerDelegate
+        from bleak.backends.device import BLEDevice
+
+        manager = CentralManagerDelegate()
+        await manager.wait_until_ready()
+        cm = manager.central_manager
+        if self.address:
+            u = NSUUID.alloc().initWithUUIDString_(self.address)
+            if u:
+                for p in cm.retrievePeripheralsWithIdentifiers_(NSArray.arrayWithObject_(u)):
+                    self.name = p.name() or self.address
+                    return BLEDevice(p.identifier().UUIDString(), self.name, (p, manager))
+        uuids = NSArray.arrayWithArray_([
+            CBUUID.UUIDWithString_(str(SERVICE)),
+            CBUUID.UUIDWithString_("180F"),
+        ])
+        for p in cm.retrieveConnectedPeripheralsWithServices_(uuids):
+            name = p.name() or ""
+            if name.startswith(prefix):
+                self.name = name
+                return BLEDevice(p.identifier().UUIDString(), name, (p, manager))
+        return None
+
     async def _find(self, prefix):
+        if sys.platform == "darwin":
+            dev = await self._find_macos(prefix)
+            if dev:
+                return dev
+        if self.address:
+            return self.address
         if sys.platform.startswith("linux"):
             for cmd in (["bluetoothctl", "devices", "Paired"], ["bluetoothctl", "paired-devices"]):
                 try:
@@ -69,7 +100,7 @@ class BleakLink(LinkBase):
             if (dev.name or "").startswith(prefix):
                 self.name = dev.name
                 print(f"found {dev.name} at {dev.address} - pass --address {dev.address} next time")
-                return dev.address
+                return dev
         return None
 
     async def write_ctrl(self, payload: bytes) -> bool:

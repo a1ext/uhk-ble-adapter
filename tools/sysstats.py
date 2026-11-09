@@ -1,11 +1,10 @@
 """The computer's load for the adapter's dashboard (src/sysmon.h): one "SY"
 packet per sample - CPU / RAM / GPU / VRAM in percent, network and disk rates,
 CPU / GPU temperatures. psutil for the system, NVML (pynvml) for an NVIDIA GPU
-on Windows / Linux, ioreg for the GPU of an Apple Silicon Mac; whatever is not
+on Windows / Linux, IOKit for the GPU of an Apple Silicon Mac; whatever is not
 available goes out as 0xFF.
 """
 import struct
-import subprocess
 import sys
 import time
 
@@ -37,23 +36,66 @@ class GpuNvml:
 
 
 class GpuMac:
-    """Apple GPU: IOAccelerator's PerformanceStatistics through ioreg (no root)."""
+    """Apple GPU: IOAccelerator's PerformanceStatistics through IOKit (no root, no subprocess)."""
     name = "Apple GPU"
 
     def __init__(self):
         if sys.platform != "darwin":
             raise OSError("not a Mac")
-        self.read()
+        import ctypes
+        import objc
+        self._ctypes = ctypes
+        self._objc = objc
+        self._iokit = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/IOKit.framework/IOKit")
+        self._cf = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+        self._iokit.IOServiceMatching.argtypes = [ctypes.c_char_p]
+        self._iokit.IOServiceMatching.restype = ctypes.c_void_p
+        self._iokit.IOServiceGetMatchingServices.argtypes = [
+            ctypes.c_uint32, ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32)
+        ]
+        self._iokit.IOServiceGetMatchingServices.restype = ctypes.c_int32
+        self._iokit.IOIteratorNext.argtypes = [ctypes.c_uint32]
+        self._iokit.IOIteratorNext.restype = ctypes.c_uint32
+        self._iokit.IORegistryEntryCreateCFProperties.argtypes = [
+            ctypes.c_uint32, ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p, ctypes.c_uint32
+        ]
+        self._iokit.IORegistryEntryCreateCFProperties.restype = ctypes.c_int32
+        self._iokit.IOObjectRelease.argtypes = [ctypes.c_uint32]
+        self._cf.CFRelease.argtypes = [ctypes.c_void_p]
+
+        it = ctypes.c_uint32(0)
+        self._iokit.IOServiceGetMatchingServices(
+            0, self._iokit.IOServiceMatching(b"IOAccelerator"), ctypes.byref(it)
+        )
+        self._entry = 0
+        while True:
+            entry = self._iokit.IOIteratorNext(it.value)
+            if not entry:
+                break
+            if self._read_entry(entry) is not None:
+                self._entry = entry
+                break
+            self._iokit.IOObjectRelease(entry)
+        self._iokit.IOObjectRelease(it.value)
+        if not self._entry:
+            raise LookupError("no IOAccelerator with Device Utilization %")
+
+    def _read_entry(self, entry):
+        props = self._ctypes.c_void_p(0)
+        if self._iokit.IORegistryEntryCreateCFProperties(entry, self._ctypes.byref(props), None, 0) != 0 or not props.value:
+            return None
+        try:
+            d = self._objc.objc_object(c_void_p=props)
+            stats = d.get("PerformanceStatistics")
+            if stats and "Device Utilization %" in stats:
+                return int(stats["Device Utilization %"])
+            return None
+        finally:
+            self._cf.CFRelease(props)
 
     def read(self):
-        import plistlib
-        out = subprocess.run(["ioreg", "-a", "-r", "-d", "1", "-c", "IOAccelerator"],
-                             capture_output=True, timeout=5).stdout
-        for node in plistlib.loads(out):
-            stats = node.get("PerformanceStatistics", {})
-            if "Device Utilization %" in stats:
-                return int(stats["Device Utilization %"]), NA8, NA8
-        return NA8, NA8, NA8
+        v = self._read_entry(self._entry)
+        return (v if v is not None else NA8), NA8, NA8
 
 
 def pick_gpu():
