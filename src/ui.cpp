@@ -1127,6 +1127,63 @@ static const uint32_t    ringColors[DASH_RINGS][2] = {{COLOR_VIOLET, COLOR_NEON}
 // A ring gauge: a dark track, the filled part a gradient from the ring's
 // first colour at the start to its second at the end (the fill reveals it)
 // with a soft glow, drawn as overlapping arcs from each step to the end
+// One masked, gradient-filled arc: outer radius `ro`, inner `ri`, from `a0` for `sweep`
+// degrees, horizontal gradient c0 -> c1 over the ring's box. The angle mask and the
+// two radius masks give anti-aliased edges all around (the stacked lv_draw_arc
+// segments used before showed as steps on the panel). `rd` must be static storage of
+// its own per ring and layer: LVGL's gradient cache is keyed by the descriptor's
+// ADDRESS and the size, so a stack descriptor served ring 2 ring 1's colours
+static void ringArc(lv_draw_ctx_t *ctx, lv_draw_rect_dsc_t *rd, lv_point_t c, lv_coord_t ro, lv_coord_t ri,
+                    uint16_t a0, uint16_t sweep, lv_color_t c0, lv_color_t c1, lv_opa_t opa)
+{
+    lv_area_t outer = {(lv_coord_t)(c.x - ro), (lv_coord_t)(c.y - ro), (lv_coord_t)(c.x + ro - 1), (lv_coord_t)(c.y + ro - 1)};
+    lv_area_t inner = {(lv_coord_t)(c.x - ri), (lv_coord_t)(c.y - ri), (lv_coord_t)(c.x + ri - 1), (lv_coord_t)(c.y + ri - 1)};
+    lv_draw_mask_angle_param_t am;
+    lv_draw_mask_radius_param_t mo, mi;
+    lv_draw_mask_angle_init(&am, c.x, c.y, a0, a0 + sweep);
+    lv_draw_mask_radius_init(&mo, &outer, LV_RADIUS_CIRCLE, false);
+    lv_draw_mask_radius_init(&mi, &inner, LV_RADIUS_CIRCLE, true);
+    int16_t ida = lv_draw_mask_add(&am, nullptr), ido = lv_draw_mask_add(&mo, nullptr), idi = lv_draw_mask_add(&mi, nullptr);
+    lv_draw_rect_dsc_init(rd);
+    rd->bg_opa = opa;
+    rd->bg_grad.dir = LV_GRAD_DIR_HOR;
+    rd->bg_grad.stops_count = 2;
+    rd->bg_grad.stops[0].color = c0;
+    rd->bg_grad.stops[0].frac = 0;
+    rd->bg_grad.stops[1].color = c1;
+    rd->bg_grad.stops[1].frac = 255;
+    lv_draw_rect(ctx, rd, &outer);
+    lv_draw_mask_remove_id(idi);
+    lv_draw_mask_remove_id(ido);
+    lv_draw_mask_remove_id(ida);
+    lv_draw_mask_free_param(&mi);
+    lv_draw_mask_free_param(&mo);
+    lv_draw_mask_free_param(&am);
+}
+
+// A round cap of diameter `w` centred on the arc's centre line at angle `ang`, kept to
+// the half outside the arc (angle mask [ang, ang + 90] or [ang - 90, ang]) so a
+// translucent fill does not double up where cap and arc would overlap
+static void ringCap(lv_draw_ctx_t *ctx, lv_point_t c, lv_coord_t rmid, lv_coord_t w, uint16_t ang, bool after,
+                    lv_color_t color, lv_opa_t opa)
+{
+    lv_coord_t x = c.x + (rmid * lv_trigo_cos(ang) >> LV_TRIGO_SHIFT);
+    lv_coord_t y = c.y + (rmid * lv_trigo_sin(ang) >> LV_TRIGO_SHIFT);
+    lv_coord_t h = w / 2;
+    lv_area_t a = {(lv_coord_t)(x - h), (lv_coord_t)(y - h), (lv_coord_t)(x + h - 1), (lv_coord_t)(y + h - 1)};
+    lv_draw_mask_angle_param_t am;
+    lv_draw_mask_angle_init(&am, c.x, c.y, after ? ang : (ang + 270) % 360, after ? ang + 90 : ang);
+    int16_t id = lv_draw_mask_add(&am, nullptr);
+    lv_draw_rect_dsc_t rd;
+    lv_draw_rect_dsc_init(&rd);
+    rd.radius = LV_RADIUS_CIRCLE;
+    rd.bg_color = color;
+    rd.bg_opa = opa;
+    lv_draw_rect(ctx, &rd, &a);
+    lv_draw_mask_remove_id(id);
+    lv_draw_mask_free_param(&am);
+}
+
 static void ringDrawEvent(lv_event_t *e)
 {
     uint8_t i = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
@@ -1149,26 +1206,19 @@ static void ringDrawEvent(lv_event_t *e)
     if (sweep < 2)
         sweep = 2;
     lv_color_t c0 = lv_color_hex(ringColors[i][0]), c1 = lv_color_hex(ringColors[i][1]);
-    auto at = [&](uint16_t deg) { return lv_color_mix(c1, c0, (uint8_t)(deg * 255UL / RING_SWEEP)); };
-
-    d.rounded = 0;
-    d.opa = LV_OPA_30; // glow: a wider, fainter copy behind
-    d.width = RING_W + 6;
-    for (uint16_t s = 0; s < sweep; s += 24) {
-        d.color = at(s + 12);
-        lv_draw_arc(ctx, &d, &c, RING_R + 3, RING_A0 + s, RING_A0 + sweep);
-    }
-    d.opa = LV_OPA_COVER;
-    d.width = RING_W;
-    d.rounded = 1; // the first arc carries both round caps
-    for (uint16_t s = 0; s < sweep; s += 8) {
-        d.color = at(s + 4);
-        lv_draw_arc(ctx, &d, &c, RING_R, RING_A0 + s, RING_A0 + sweep);
-        d.rounded = 0;
-    }
-    d.rounded = 1; // the end cap in the colour the ring reached
-    d.color = at(sweep);
-    lv_draw_arc(ctx, &d, &c, RING_R, RING_A0 + sweep - 1, RING_A0 + sweep);
+    // The gradient runs left to right across the box; the colour the fill reaches at
+    // its end is read off the same ramp for the end cap
+    lv_coord_t xEnd = (RING_R * lv_trigo_cos(RING_A0 + sweep) >> LV_TRIGO_SHIFT);
+    lv_color_t cEnd = lv_color_mix(c1, c0, (uint8_t)((xEnd + RING_R) * 255 / (2 * RING_R)));
+    const lv_opa_t FILL = LV_OPA_80, GLOW = LV_OPA_20;
+    const uint16_t end = RING_A0 + sweep;
+    // glow: wider and fainter, running a little past both ends like the caps
+    static lv_draw_rect_dsc_t ringDsc[DASH_RINGS][2]; // see ringArc()
+    ringArc(ctx, &ringDsc[i][0], c, RING_R + 4, RING_R - RING_W - 4, RING_A0 - 6, sweep + 12, c0, c1, GLOW);
+    // the fill with its round caps
+    ringArc(ctx, &ringDsc[i][1], c, RING_R, RING_R - RING_W, RING_A0, sweep, c0, c1, FILL);
+    ringCap(ctx, c, RING_R - RING_W / 2, RING_W, RING_A0, false, c0, FILL);
+    ringCap(ctx, c, RING_R - RING_W / 2, RING_W, end % 360, true, cEnd, FILL);
 }
 
 static void makeDashboard()

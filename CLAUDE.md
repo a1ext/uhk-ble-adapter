@@ -261,7 +261,11 @@ pin (USB port or charger).
   (`ui_show_dashboard`): clock 48 px + date "Wednesday, 28 Oct" 20 px along the top edge (RTC
   date via `display_rtc_read_date`, read every 30 s), the next-meeting line under them (the
   reminder card is moved down over that line and narrowed while the dashboard is shown), RAM / VRAM as two ring gauges (custom draw: 240° arc from
-  bottom-left, gradient = overlapping `lv_draw_arc` segments to the end + a faint wider glow),
+  bottom-left; fill and glow = `lv_draw_rect` with a horizontal gradient under an angle mask +
+  two radius masks (`ringArc()`, anti-aliased all round — stacked `lv_draw_arc` segments showed
+  as steps on the panel), round caps = masked circles on the half outside the arc. LVGL's
+  gradient cache is keyed by the dsc ADDRESS ^ size, so each ring / layer owns a static
+  `lv_draw_rect_dsc_t` — a stack dsc gave ring 2 ring 1's colours),
   4 tiles CPU / GPU / NET / DISK with 120-point lv_chart sparklines, 1 px per point, two
   samples averaged per point = 2 min (ext y arrays, rate tiles autoscale). Values go dim 5 s after the last packet.
 - `src/cal.*` — meetings from the PC: CTRL command 0x15 n × {id u16, start_in_min i16,
