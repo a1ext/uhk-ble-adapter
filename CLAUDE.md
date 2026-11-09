@@ -47,7 +47,10 @@ pin (USB port or charger).
   `uhk_ble_shell_assembly.f3d`: rebuilds both bodies from parameters, interference check,
   exports STL / STEP / f3d). 2026-11-09 JLCPCB SLA review: tray counterbores were 0.3 / 0.4 mm
   from the side walls → tab + tray widened to y 6.8..32.7, tray bosses Ø4.0, counterbore
-  Ø2.4 × 1.2 (floor only); min wall now 1.2 mm. The Fusion MCP is a Claude Desktop extension
+  Ø2.4 × 1.2 (floor only); lid: the case screw head seat raised to Z 6.9 (above the daughter
+  board) with Ø4.8 bosses around the Ø2.4 counterbores from there to the ceiling, pilots 3.4
+  deep → case screws = native + 4 mm (M1.2×8); min wall now 1.0 mm (lid) / 1.2 (tray), checked
+  by ray-cast thickness over the STLs. The Fusion MCP is a Claude Desktop extension
   (needs Fusion running + the extension enabled); without it the script runs from Fusion's
   Scripts and Add-Ins dialog.
 

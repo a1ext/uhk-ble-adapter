@@ -11,7 +11,10 @@ min 0.8 mm, 1.5 optimal): the tray's screw head counterbores (dia 2.4) were 0.3 
 0.4 mm from its side walls and the dia 3.0 bosses left a 0.3 mm ring around
 them. Now: tray and lid tab widened (y 6.8..32.7 instead of 7.8..31.8, the
 screws stay where the daughter board allows them), tray bosses dia 4.0, the
-counterbore only as deep as the floor (1.2 mm).
+counterbore only as deep as the floor (1.2 mm). Lid (min 0.9 mm wanted): the
+case screw head seat moved up to Z 6.9, above the daughter board, with dia 4.8
+bosses around the dia 2.4 counterbores from there to the ceiling (the dia 3.4
+bosses left a 0.5 mm ring); pilot holes 3.4 deep (1.0 mm to the top).
 """
 import math
 import os
@@ -33,7 +36,9 @@ CASE_SCREWS = [(4.26, 9.12, 3.4), (21.71, 9.07, 3.4), (22.34, 52.47, 4.5)]   # x
 TRAY_SCREWS = [(-12.0, 9.3), (-12.0, 30.2)]   # as far out as the board (y 11.07..28.47) allows the lid bosses
 LID_BOSS_D, LID_PILOT_D = 3.0, 1.0
 TRAY_BOSS_D, TRAY_HOLE_D, TRAY_HEAD_D, TRAY_HEAD_DEPTH = 4.0, 1.4, 2.4, 1.2   # was 3.0 / 1.4 / 2.4 x 2.0
-CASE_HOLE_D, CASE_HEAD_D, CASE_HEAD_TO_Z = 1.4, 2.4, 5.8
+CASE_HOLE_D, CASE_HEAD_D, CASE_HEAD_TO_Z = 1.4, 2.4, 6.9   # head seat was 5.8: 0.5 mm ring around it
+CASE_BOSS_TOP_D = 4.8   # boss around the head counterbore, Z CASE_HEAD_TO_Z .. ceiling (over the board, 1.2 mm ring)
+LID_PILOT_DEPTH = 3.4   # 1.0 mm left under the lid top (was 3.6 -> 0.8); a M1.2x6 ends at Z 7.2
 J1_Y, J1_Z = 16.473, 3.35               # daughter board USB-C receptacle mouth centre
 USB_W, USB_H, USB_R = 13.0, 7.4, 2.0    # plug opening through both end walls
 PADS_Y = (13.5, 26.0)                   # board press pads on the lid tab ceiling
@@ -189,6 +194,9 @@ def run(_context: str):
     # bosses up to the ceiling
     sk = circles(plane_z(LID_Z0), CASE_SCREWS + [(x, y, LID_BOSS_D) for x, y in TRAY_SCREWS], 'lid_bosses')
     extrude(coll(circle_profiles(sk)), lid_ceiling - LID_Z0, JOIN, [lid])
+    # wider boss around each case screw head, above the daughter board (Z 5.0 .. 6.6)
+    sk = circles(plane_z(CASE_HEAD_TO_Z), [(x, y, CASE_BOSS_TOP_D) for x, y, _ in CASE_SCREWS], 'lid_head_bosses')
+    extrude(coll(circle_profiles(sk)), lid_ceiling - CASE_HEAD_TO_Z, JOIN, [lid])
     # board press pads on the tab: Z 6.75 -> ceiling
     sk = comp.sketches.add(plane_z(6.75))
     sk.name = 'lid_pads'
@@ -202,7 +210,7 @@ def run(_context: str):
     extrude(coll(circle_profiles(sk)), -(lid_top - CASE_HEAD_TO_Z), CUT, [lid])
     # tray screw pilot holes into the tab bosses
     sk = circles(plane_z(LID_Z0), [(x, y, LID_PILOT_D) for x, y in TRAY_SCREWS], 'lid_tray_pilots')
-    extrude(coll(circle_profiles(sk)), 3.6, CUT, [lid])
+    extrude(coll(circle_profiles(sk)), LID_PILOT_DEPTH, CUT, [lid])
     # board edge slot in the H2-side wall
     sk = comp.sketches.add(plane_z(LID_Z0))
     sk.name = 'lid_board_slot'
