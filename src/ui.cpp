@@ -1101,18 +1101,75 @@ bool ui_reminder_touch(int16_t x, int16_t y)
 }
 
 // ---------------- Dashboard (standby screen) ----------------
-// The next meeting along the top (the reminder card covers that line when it
-// is up), the clock and the date, and the computer's load in six tiles, each
-// with a minute of history. Its own LVGL screen, loaded instead of the main one.
-static const uint8_t    DASH_TILES = 6, DASH_POINTS = 60;
-static const lv_coord_t TILE_Y = 118, TILE_W = 82, TILE_H = 116, TILE_GAP = 6, TILE_X0 = 6;
+// The clock and the date along the top edge, the next meeting under them
+// (the reminder card moves down over that line while it is up, so the clock
+// stays readable), RAM and VRAM as two ring gauges on the right, and CPU /
+// GPU / network / disk in four tiles along the bottom, each with two minutes
+// of history. Its own LVGL screen, loaded instead of the main one.
+static const uint8_t    DASH_TILES = 4, DASH_RINGS = 2;
+static const uint8_t    DASH_POINTS = 120, DASH_ACC = 2; // 1 px per point, 2 samples (1 s) averaged into one
+static const lv_coord_t TILE_Y = 118, TILE_W = 128, TILE_H = 116, TILE_GAP = 6, TILE_X0 = 3;
+static const lv_coord_t RING_BOX = 80, RING_R = 36, RING_W = 8, RING_Y = 38; // outer radius / arc width
+static const lv_coord_t NEXT_Y = 74, NEXT_W = 352;                           // the meeting line, left of the rings
+static const uint16_t   RING_A0 = 150, RING_SWEEP = 240;    // from bottom-left clockwise, the gap at the bottom
 static lv_obj_t *dashScr, *dashClock, *dashDate, *dashNext;
 static lv_obj_t *dashValues[DASH_TILES], *dashTemps[DASH_TILES], *dashCharts[DASH_TILES];
+static lv_obj_t *dashRings[DASH_RINGS], *dashRingValues[DASH_RINGS];
 static lv_chart_series_t *dashSeries[DASH_TILES];
 static lv_coord_t dashHist[DASH_TILES][DASH_POINTS];
+static uint8_t    dashRingPct[DASH_RINGS] = {0xFF, 0xFF};
 static bool       dashShown, dashLive;
-static const char *const dashNames[DASH_TILES] = {"CPU", "RAM", "GPU", "VRAM", "NET", "DISK"};
-static const uint32_t    dashColors[DASH_TILES] = {COLOR_NEON, COLOR_VIOLET, 0x2EC4FF, 0x39FFC8, COLOR_GREEN, COLOR_AMBER};
+static const char *const dashNames[DASH_TILES] = {"CPU", "GPU", "NET", "DISK"};
+static const uint32_t    dashColors[DASH_TILES] = {COLOR_NEON, 0x2EC4FF, COLOR_GREEN, COLOR_AMBER};
+static const char *const ringNames[DASH_RINGS] = {"RAM", "VRAM"};
+static const uint32_t    ringColors[DASH_RINGS][2] = {{COLOR_VIOLET, COLOR_NEON}, {0x2EC4FF, 0x39FFC8}}; // start → end of the ring
+
+// A ring gauge: a dark track, the filled part a gradient from the ring's
+// first colour at the start to its second at the end (the fill reveals it)
+// with a soft glow, drawn as overlapping arcs from each step to the end
+static void ringDrawEvent(lv_event_t *e)
+{
+    uint8_t i = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
+    lv_draw_ctx_t *ctx = lv_event_get_draw_ctx(e);
+    lv_area_t a;
+    lv_obj_get_coords(lv_event_get_target(e), &a);
+    lv_point_t c = {(lv_coord_t)((a.x1 + a.x2 + 1) / 2), (lv_coord_t)((a.y1 + a.y2 + 1) / 2)};
+
+    lv_draw_arc_dsc_t d;
+    lv_draw_arc_dsc_init(&d);
+    d.width = RING_W;
+    d.rounded = 1;
+    d.color = lv_color_hex(0x24242A); // track, a touch brighter than COLOR_TRACK on pure black
+    lv_draw_arc(ctx, &d, &c, RING_R, RING_A0, RING_A0 + RING_SWEEP);
+
+    uint8_t pct = dashRingPct[i];
+    if (!dashLive || pct == 0xFF)
+        return;
+    uint16_t sweep = (uint16_t)(RING_SWEEP * (uint32_t)min<uint8_t>(pct, 100) / 100);
+    if (sweep < 2)
+        sweep = 2;
+    lv_color_t c0 = lv_color_hex(ringColors[i][0]), c1 = lv_color_hex(ringColors[i][1]);
+    auto at = [&](uint16_t deg) { return lv_color_mix(c1, c0, (uint8_t)(deg * 255UL / RING_SWEEP)); };
+
+    d.rounded = 0;
+    d.opa = LV_OPA_30; // glow: a wider, fainter copy behind
+    d.width = RING_W + 6;
+    for (uint16_t s = 0; s < sweep; s += 24) {
+        d.color = at(s + 12);
+        lv_draw_arc(ctx, &d, &c, RING_R + 3, RING_A0 + s, RING_A0 + sweep);
+    }
+    d.opa = LV_OPA_COVER;
+    d.width = RING_W;
+    d.rounded = 1; // the first arc carries both round caps
+    for (uint16_t s = 0; s < sweep; s += 8) {
+        d.color = at(s + 4);
+        lv_draw_arc(ctx, &d, &c, RING_R, RING_A0 + s, RING_A0 + sweep);
+        d.rounded = 0;
+    }
+    d.rounded = 1; // the end cap in the colour the ring reached
+    d.color = at(sweep);
+    lv_draw_arc(ctx, &d, &c, RING_R, RING_A0 + sweep - 1, RING_A0 + sweep);
+}
 
 static void makeDashboard()
 {
@@ -1121,14 +1178,33 @@ static void makeDashboard()
     lv_obj_set_style_pad_all(dashScr, 0, 0);
     lv_obj_clear_flag(dashScr, LV_OBJ_FLAG_SCROLLABLE);
 
-    dashNext = makeLabel(dashScr, &lv_font_montserrat_16, COLOR_AMBER);
-    lv_obj_set_pos(dashNext, 14, 16);
-    lv_obj_set_width(dashNext, 508);
-    lv_label_set_long_mode(dashNext, LV_LABEL_LONG_DOT);
     dashClock = makeLabel(dashScr, &lv_font_montserrat_48, COLOR_TEXT);
-    lv_obj_set_pos(dashClock, 12, 50);
-    dashDate = makeLabel(dashScr, &lv_font_montserrat_16, COLOR_DIM);
-    lv_obj_set_pos(dashDate, 176, 80);
+    lv_obj_set_pos(dashClock, 12, 2);
+    dashDate = makeLabel(dashScr, &lv_font_montserrat_20, COLOR_DIM);
+    lv_obj_set_pos(dashDate, 148, 27); // on the clock's baseline, up to the rings
+    lv_obj_set_size(dashDate, 220, 26); // a fixed height: too long = dots, not a second line
+    lv_label_set_long_mode(dashDate, LV_LABEL_LONG_DOT);
+    dashNext = makeLabel(dashScr, &lv_font_montserrat_16, COLOR_AMBER);
+    lv_obj_set_pos(dashNext, 14, NEXT_Y);
+    lv_obj_set_width(dashNext, NEXT_W);
+    lv_label_set_long_mode(dashNext, LV_LABEL_LONG_DOT);
+
+    for (uint8_t i = 0; i < DASH_RINGS; i++) {
+        lv_obj_t *r = dashRings[i] = lv_obj_create(dashScr);
+        lv_obj_set_pos(r, lv_disp_get_hor_res(nullptr) - RING_BOX - (DASH_RINGS - 1 - i) * (RING_BOX + 4), RING_Y);
+        lv_obj_set_size(r, RING_BOX, RING_BOX);
+        lv_obj_set_style_bg_opa(r, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(r, 0, 0);
+        lv_obj_set_style_pad_all(r, 0, 0);
+        lv_obj_clear_flag(r, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_event_cb(r, ringDrawEvent, LV_EVENT_DRAW_MAIN, (void *)(uintptr_t)i);
+        dashRingValues[i] = makeLabel(r, &lv_font_montserrat_18, COLOR_DIM);
+        lv_label_set_text(dashRingValues[i], "-");
+        lv_obj_align(dashRingValues[i], LV_ALIGN_CENTER, 0, -2);
+        lv_obj_t *name = makeLabel(r, &lv_font_montserrat_12, COLOR_DIM);
+        lv_label_set_text(name, ringNames[i]);
+        lv_obj_align(name, LV_ALIGN_CENTER, 0, 27); // in the gap at the bottom of the ring
+    }
 
     for (uint8_t i = 0; i < DASH_TILES; i++) {
         lv_obj_t *t = lv_obj_create(dashScr);
@@ -1138,17 +1214,18 @@ static void makeDashboard()
         lv_obj_set_style_border_width(t, 0, 0);
         lv_obj_set_style_radius(t, 10, 0);
         lv_obj_set_style_pad_all(t, 6, 0);
+        lv_obj_set_style_pad_hor(t, 4, 0);
         lv_obj_clear_flag(t, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_t *name = makeLabel(t, &lv_font_montserrat_12, COLOR_DIM);
         lv_label_set_text(name, dashNames[i]);
-        lv_obj_align(name, LV_ALIGN_TOP_LEFT, 0, 1);
-        dashValues[i] = makeLabel(t, &lv_font_montserrat_14, dashColors[i]);
+        lv_obj_align(name, LV_ALIGN_TOP_LEFT, 2, 3);
+        dashValues[i] = makeLabel(t, &lv_font_montserrat_16, dashColors[i]);
         lv_label_set_text(dashValues[i], "-");
-        lv_obj_align(dashValues[i], LV_ALIGN_TOP_RIGHT, 0, 0);
+        lv_obj_align(dashValues[i], LV_ALIGN_TOP_RIGHT, -2, 0);
         dashTemps[i] = makeLabel(t, &lv_font_montserrat_12, COLOR_DIM); // CPU / GPU temperature
-        lv_obj_align(dashTemps[i], LV_ALIGN_TOP_RIGHT, 0, 17);
+        lv_obj_align(dashTemps[i], LV_ALIGN_TOP_RIGHT, -2, 19);
         lv_obj_t *ch = dashCharts[i] = lv_chart_create(t);
-        lv_obj_set_size(ch, TILE_W - 12, TILE_H - 46);
+        lv_obj_set_size(ch, DASH_POINTS, TILE_H - 46);
         lv_obj_align(ch, LV_ALIGN_BOTTOM_MID, 0, 0);
         lv_chart_set_type(ch, LV_CHART_TYPE_LINE);
         lv_chart_set_point_count(ch, DASH_POINTS);
@@ -1166,7 +1243,7 @@ static void makeDashboard()
     }
 }
 
-// Newest value at the right; the range of a rate tile follows its minute
+// Newest value at the right; the range of a rate tile follows its history
 static void pushPoint(uint8_t i, lv_coord_t v, bool autoRange)
 {
     memmove(dashHist[i], dashHist[i] + 1, sizeof(lv_coord_t) * (DASH_POINTS - 1));
@@ -1179,6 +1256,22 @@ static void pushPoint(uint8_t i, lv_coord_t v, bool autoRange)
         lv_chart_set_range(dashCharts[i], LV_CHART_AXIS_PRIMARY_Y, 0, top);
     }
     lv_chart_refresh(dashCharts[i]);
+}
+
+// DASH_ACC samples are averaged into one chart point (n/a samples left out)
+static void addSample(uint8_t i, uint32_t v, bool valid, bool autoRange, bool flush)
+{
+    static uint32_t sum[DASH_TILES];
+    static uint8_t  n[DASH_TILES];
+    if (valid) {
+        sum[i] += v;
+        n[i]++;
+    }
+    if (!flush)
+        return;
+    pushPoint(i, n[i] ? (lv_coord_t)(sum[i] / n[i]) : LV_CHART_POINT_NONE, autoRange);
+    sum[i] = 0;
+    n[i] = 0;
 }
 
 static void percentText(uint8_t v, char *out, size_t size)
@@ -1225,8 +1318,8 @@ static void updateDashboard()
         uint8_t  mo, d;
         if (display_rtc_read_date(y, mo, d)) {
             static const char *const days[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
-            static const char *const months[] = {"January", "February", "March", "April", "May", "June",
-                                                 "July", "August", "September", "October", "November", "December"};
+            static const char *const months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                                 "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
             static const int t[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4}; // Sakamoto's day of the week
             int yy = y - (mo < 3);
             int wd = (yy + yy / 4 - yy / 100 + yy / 400 + t[mo - 1] + d) % 7;
@@ -1256,26 +1349,39 @@ static void updateDashboard()
 
     SysSample sm;
     if (sysmon_take(sm)) {
+        static uint8_t accCount = 0;
+        bool flush = ++accCount >= DASH_ACC;
+        if (flush)
+            accCount = 0;
         char v[16];
-        const uint8_t pct[4] = {sm.cpu, sm.ram, sm.gpu, sm.vram};
-        for (uint8_t i = 0; i < 4; i++) {
+        const uint8_t pct[2] = {sm.cpu, sm.gpu};
+        for (uint8_t i = 0; i < 2; i++) {
             percentText(pct[i], v, sizeof(v));
             setText(dashValues[i], v);
+            addSample(i, pct[i], pct[i] != 0xFF, false, flush);
         }
         tempText(sm.cpuTemp, v, sizeof(v));
         setText(dashTemps[0], v);
         tempText(sm.gpuTemp, v, sizeof(v));
-        setText(dashTemps[2], v);
+        setText(dashTemps[1], v);
         uint32_t net = (sm.netRx == 0xFFFF ? 0 : sm.netRx) + (sm.netTx == 0xFFFF ? 0 : sm.netTx);
         uint32_t disk = ((sm.diskR == 0xFFFF ? 0 : sm.diskR) + (sm.diskW == 0xFFFF ? 0 : sm.diskW)) * 100UL;
         rateText(net, v, sizeof(v));
-        setText(dashValues[4], v);
+        setText(dashValues[2], v);
         rateText(disk, v, sizeof(v));
-        setText(dashValues[5], v);
-        for (uint8_t i = 0; i < 4; i++)
-            pushPoint(i, pct[i] == 0xFF ? LV_CHART_POINT_NONE : pct[i], false);
-        pushPoint(4, min<uint32_t>(net, 30000), true);
-        pushPoint(5, min<uint32_t>(disk, 30000), true);
+        setText(dashValues[3], v);
+        addSample(2, min<uint32_t>(net, 30000), true, true, flush);
+        addSample(3, min<uint32_t>(disk, 30000), true, true, flush);
+
+        const uint8_t ring[DASH_RINGS] = {sm.ram, sm.vram};
+        for (uint8_t i = 0; i < DASH_RINGS; i++) {
+            percentText(ring[i], v, sizeof(v));
+            setText(dashRingValues[i], v);
+            if (ring[i] != dashRingPct[i]) {
+                dashRingPct[i] = ring[i];
+                lv_obj_invalidate(dashRings[i]);
+            }
+        }
     }
     bool live = sysmon_streaming();
     if (live != dashLive) {
@@ -1285,6 +1391,12 @@ static void updateDashboard()
             if (!live)
                 setText(dashValues[i], "-");
         }
+        for (uint8_t i = 0; i < DASH_RINGS; i++) {
+            lv_obj_set_style_text_color(dashRingValues[i], lv_color_hex(live ? ringColors[i][1] : COLOR_DIM), 0);
+            if (!live)
+                setText(dashRingValues[i], "-");
+            lv_obj_invalidate(dashRings[i]);
+        }
     }
 }
 
@@ -1293,6 +1405,10 @@ void ui_show_dashboard(bool on)
     if (on == dashShown)
         return;
     dashShown = on;
+    // The reminder card sits over the title row of the main screen; on the
+    // dashboard it covers the meeting line instead, short of the rings
+    lv_obj_set_pos(remindCard, REMIND_X, on ? NEXT_Y - 10 : REMIND_Y);
+    lv_obj_set_width(remindCard, on ? NEXT_W + 14 - REMIND_X : REMIND_W);
     if (on)
         updateDashboard();
     lv_scr_load(on ? dashScr : mainScr);

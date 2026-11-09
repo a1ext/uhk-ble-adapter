@@ -194,7 +194,7 @@ and writes `dist/uhk-ble-live.exe` (~30 MB) and `dist/uhk-ble-anim.exe`
 
 <table>
   <tr>
-    <td><img src="docs/img/screen-dash.png" width="400" alt="Dashboard: the next meeting along the top, a large clock with the date, and six tiles - CPU, RAM, GPU, VRAM, NET, DISK - each with a sparkline of the last minute"></td>
+    <td><img src="docs/img/screen-dash.png" width="400" alt="Dashboard: a large clock with the date along the top, the next meeting under them, RAM and VRAM as ring gauges, and four tiles - CPU, GPU, NET, DISK - each with a sparkline of the last two minutes"></td>
     <td><img src="docs/img/screen-live-remind.png" width="400" alt="The live spectrum with a translucent reminder card over it: in 4 min, 1:1 with Anna, 14:41 - 15:41, and an X button"></td>
   </tr>
   <tr>
@@ -210,8 +210,9 @@ Both are fed by the same PC tool as the spectrum - `uhk-ble-live.exe` or
 three minutes of dashboard and two of animation in turns (`ble_anim.py set
 --mode 2` / `3` does the same from the PC). After 60 s without a touch it
 shows the clock and date (the board's RTC, set by the PC tools), the next
-meeting, and the PC's load: CPU and GPU with their temperatures, RAM and VRAM
-in percent, network and disk rates, each with the last minute as a sparkline.
+meeting, and the PC's load: RAM and VRAM as ring gauges, CPU and GPU with
+their temperatures, network and disk rates, each with the last two minutes as
+a sparkline.
 The load comes as 17 bytes twice a second while the tool runs ("System stats"
 in the tray menu, `--no-stats` to leave it out); without it the tiles stay dim
 and the clock remains. GPU: NVIDIA through NVML on Windows and Linux, Apple

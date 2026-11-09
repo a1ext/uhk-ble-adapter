@@ -248,9 +248,12 @@ pin (USB port or charger).
   (17 B, 2/s: cpu / ram / gpu / vram %, net rx / tx KB/s, disk r / w in 100 KB/s, cpu / gpu
   temperature; 0xFF = n/a) from `tools/sysstats.py` (psutil; NVML via nvidia-ml-py; ioreg
   on a Mac). Standby mode 2 "Dashboard" = an LVGL screen loaded instead of the main one
-  (`ui_show_dashboard`): next-meeting line, clock 48 px + date (RTC date via
-  `display_rtc_read_date`, read every 30 s), 6 tiles with 60-sample lv_chart sparklines
-  (ext y arrays, rate tiles autoscale). Values go dim 5 s after the last packet.
+  (`ui_show_dashboard`): clock 48 px + date "Wednesday, 28 Oct" 20 px along the top edge (RTC
+  date via `display_rtc_read_date`, read every 30 s), the next-meeting line under them (the
+  reminder card is moved down over that line and narrowed while the dashboard is shown), RAM / VRAM as two ring gauges (custom draw: 240° arc from
+  bottom-left, gradient = overlapping `lv_draw_arc` segments to the end + a faint wider glow),
+  4 tiles CPU / GPU / NET / DISK with 120-point lv_chart sparklines, 1 px per point, two
+  samples averaged per point = 2 min (ext y arrays, rate tiles autoscale). Values go dim 5 s after the last packet.
 - `src/cal.*` — meetings from the PC: CTRL command 0x15 n × {id u16, start_in_min i16,
   dur_min u16, flags u8 (1 confirmed / 2 tentative), len u8, title ≤ 24 ASCII}. Times are
   relative minutes counted with millis(), so the adapter needs no date / time zone; the

@@ -290,21 +290,21 @@ int main()
     shot("screen-remind");
 
     // Dashboard: the standby screen with the clock, the next meeting (42 min
-    // away) and a minute of the PC's load
+    // away), RAM / VRAM rings and two minutes of the PC's load (2 samples / s)
     remindNow = false;
     meeting.startMs = nowMs + 42 * 60000UL;
     ui_reminder_loop(false);
     ui_show_dashboard(true);
-    for (int k = 0; k < 60; k++) {
-        float t = k / 59.0f;
-        sysSample.cpu = 18 + 30 * fabsf(sinf(k * 0.35f)) + (k > 40 ? 35 : 0);
-        sysSample.ram = 61 + k / 12;
-        sysSample.gpu = k < 25 ? 4 + (k % 5) : 55 + 30 * fabsf(sinf(k * 0.5f));
-        sysSample.vram = 38 + (k > 25 ? 21 : 0);
-        sysSample.netRx = 120 + 900 * fabsf(sinf(k * 0.22f)) * (k > 30 ? 1 : 0.2f);
+    for (int k = 0; k < 240; k++) {
+        float t = k / 239.0f;
+        sysSample.cpu = 18 + 30 * fabsf(sinf(k * 0.09f)) + (k > 160 ? 35 : 0);
+        sysSample.ram = 61 + k / 48;
+        sysSample.gpu = k < 100 ? 4 + (k % 5) : 55 + 30 * fabsf(sinf(k * 0.13f));
+        sysSample.vram = 38 + (k > 100 ? 21 : 0);
+        sysSample.netRx = 120 + 900 * fabsf(sinf(k * 0.055f)) * (k > 120 ? 1 : 0.2f);
         sysSample.netTx = 40 + 60 * t;
-        sysSample.diskR = k % 17 == 0 ? 42 : 2;
-        sysSample.diskW = k % 11 == 0 ? 18 : 1;
+        sysSample.diskR = k % 34 < 2 ? 42 : 2;
+        sysSample.diskW = k % 22 < 2 ? 18 : 1;
         sysSample.cpuTemp = 54 + sysSample.cpu / 5;
         sysSample.gpuTemp = 41 + sysSample.gpu / 3;
         sysFresh = true;
