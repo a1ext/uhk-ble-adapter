@@ -42,7 +42,14 @@ pin (USB port or charger).
   11–14 at y 23.54…15.92 (15.9–23.5 mm from the USB-C edge). The board lies component side on
   the case back (sockets flush, ~2.3 mm of pin, header plastic removed); everything except the
   pins sits on a tab beyond the VBUS-side case wall, USB-C facing away from the LilyGo.
-  3D-printed shell (Fusion): `doughter_board/shell/` (Lid + Tray, M1.2 screws, PRINT.md).
+  3D-printed shell (Fusion): `doughter_board/shell/` (Lid + Tray, M1.2 screws, PRINT.md);
+  source of truth = `build_shell.py` (Fusion API script, run in the open
+  `uhk_ble_shell_assembly.f3d`: rebuilds both bodies from parameters, interference check,
+  exports STL / STEP / f3d). 2026-11-09 JLCPCB SLA review: tray counterbores were 0.3 / 0.4 mm
+  from the side walls → tab + tray widened to y 6.8..32.7, tray bosses Ø4.0, counterbore
+  Ø2.4 × 1.2 (floor only); min wall now 1.2 mm. The Fusion MCP is a Claude Desktop extension
+  (needs Fusion running + the extension enabled); without it the script runs from Fusion's
+  Scripts and Add-Ins dialog.
 
 ## Keyboard facts (USBTreeView + UHK firmware sources, right/src/hid/*_app.hpp)
 - VID:PID **0x37A8:0x0003** ("Ultimate Gadget Laboratories", "UHK 60 v2")
