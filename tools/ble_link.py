@@ -171,6 +171,13 @@ if sys.platform == "win32":
         Windows' own connection to the paired adapter."""
 
         async def connect(self, name_prefix="UHK60 BLE"):
+            try:
+                return await self._connect(name_prefix)
+            except BaseException:            # sys.exit() too: a session / service left open here keeps
+                self.close()                 # every later attempt of this process at ACCESS_DENIED
+                raise
+
+        async def _connect(self, name_prefix):
             devices = await find_adapter(name_prefix)
             if not devices:
                 sys.exit(f"no paired device named '{name_prefix}*' - pair the adapter first")
@@ -245,6 +252,7 @@ if sys.platform == "win32":
 
         def close(self):
             """Release the service: an open one keeps the next process at ACCESS_DENIED for a while."""
+            atexit.unregister(self.close)    # it held this object (and its WinRT handles) for good
             self.close_service()
             for o in ("session", "device"):
                 if getattr(self, o, None):

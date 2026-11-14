@@ -248,6 +248,14 @@ pin (USB port or charger).
   time:** while the live stream holds the service, the others get ACCESS_DENIED
   (ble_link then says "the adapter is busy"). It must not be shared anyway: during an
   upload, live packets on DATA would go into the image.
+  A link that is not closed blocks the SAME process too (2026-11-14: the tray tool was
+  stuck at "adapter is busy" for good after all switches were off once — `run()` left by
+  `sys.exit` after `connect()`; `atexit.register(self.close)` also pinned every link
+  object): `ble_live.run()` checks "nothing to send" before connecting and closes the link
+  in `finally`, `WinRtLink.connect()` closes on any failure, `close()` unregisters itself.
+  The tray icon is refreshed from two threads (menu handler + stream): `refresh()` takes a
+  lock — two updates at once destroyed the same icon handle (WinError 1402) and the
+  exception ended the stream task, so nothing was sent until the next menu switch.
 - Brightness of the standby animation / live spectrum follows the time of day
   (`anim_brightness_now()`): night level (default 30) until 6:00, up to the day level
   (default 180) by 9:00, down again 18:00–22:00, smoothstep in perceived brightness. Clock

@@ -54,7 +54,10 @@ class Streamer:
     def set(self, status, active):
         self.status, self.active = status, active
         print(status)
-        self.on_change()
+        try:
+            self.on_change()
+        except Exception as e:               # a tray hiccup must not end the stream task
+            print(f"tray: {type(e).__name__}: {e}")
 
     def start(self):
         self.paused = False
@@ -130,7 +133,18 @@ def main():
     icons = {True: live_icon.make(True, 64), False: live_icon.make(False, 64)}
     icon = pystray.Icon("uhk-ble-live", icons[False], APP)
 
+    refresh_lock = threading.Lock()
+
     def refresh():
+        # called by the menu handlers (tray thread) and by the stream (its own thread): two
+        # icon updates at once destroyed the same icon handle twice (WinError 1402)
+        with refresh_lock:
+            try:
+                _refresh()
+            except OSError as e:
+                print(f"tray icon: {e}")
+
+    def _refresh():
         icon.icon = icons[streamer.active and not streamer.paused]
         icon.title = f"{APP}\n{'Paused' if streamer.paused else streamer.status}"[:127]
         icon.update_menu()

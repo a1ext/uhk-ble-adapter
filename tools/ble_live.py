@@ -242,27 +242,27 @@ async def run(args, on_state=None):
     ("fps", frames per second every 5 s). Raises ConnectionError when the adapter
     stops taking packets (another slot selected, out of range)."""
     from ble_link import Link
+    if not (args.audio or args.stats or (args.calendar and args.calendar_on)):   # before connecting
+        sys.exit("nothing to send: the spectrum, the system stats and the calendar are all off")
     link = Link()
     if getattr(args, "address", None):
         link.address = args.address
     lk = await link.connect(args.name)
-    if on_state:
-        on_state("connected", lk.name)
     stop = threading.Event()
     tasks = []
-    if args.audio:
-        tasks.append(asyncio.create_task(audio_loop(args, lk, stop, on_state)))
-        if sys.platform == "darwin":
-            tasks.append(asyncio.create_task(keep_awake_loop(lk)))
-    if args.stats:
-        tasks.append(asyncio.create_task(stats_loop(args, lk)))
-    if args.calendar and args.calendar_on:
-        tasks.append(asyncio.create_task(calendar_loop(args, lk)))
-    if not tasks:
-        sys.exit("nothing to send: the spectrum, the system stats and the calendar are all off")
-    print("sending: " + ", ".join(n for n, on in (("spectrum", args.audio), ("system stats", args.stats),
-                                                 ("calendar", args.calendar and args.calendar_on)) if on))
-    try:
+    try:                                    # from here on the link is closed whatever happens
+        if on_state:
+            on_state("connected", lk.name)
+        if args.audio:
+            tasks.append(asyncio.create_task(audio_loop(args, lk, stop, on_state)))
+            if sys.platform == "darwin":
+                tasks.append(asyncio.create_task(keep_awake_loop(lk)))
+        if args.stats:
+            tasks.append(asyncio.create_task(stats_loop(args, lk)))
+        if args.calendar and args.calendar_on:
+            tasks.append(asyncio.create_task(calendar_loop(args, lk)))
+        print("sending: " + ", ".join(n for n, on in (("spectrum", args.audio), ("system stats", args.stats),
+                                                     ("calendar", args.calendar and args.calendar_on)) if on))
         done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
         for t in done:
             t.result()                      # raises what ended it
